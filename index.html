@@ -34,17 +34,17 @@
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         
-        // 低分辨率缩放
         const SCALE = 2;
         canvas.style.width = canvas.width * SCALE + 'px';
         canvas.style.height = canvas.height * SCALE + 'px';
         
-        const GRAVITY = 0.4;
+        const GRAVITY = 0.5;
         const MAX_POWER = 12;
         const POWER_RATE = 0.2;
-        const JUMP_POWER = 8;
+        const JUMP_POWER = 10;
         const HOLD_THRESHOLD = 15;
-        const MOVE_SPEED = 2;
+        const MOVE_SPEED = 2.5;
+        const GROUND_Y = 220;
         
         let isSeparated = false;
         let isCharging = false;
@@ -52,172 +52,207 @@
         let holdFrames = 0;
         let wasSeparating = false;
         let isCrouching = false;
-        let crouchFrames = 0;
         let animFrame = 0;
         let walkCycle = 0;
         
-        const lowerBody = {
+        // 果冻物理状态
+        const jellyLower = {
             x: 200, y: 160,
-            vx: 0, vy: 0,
-            color: '#e74c3c',
-            onGround: false,
-            width: 12,
-            height: 16,
-            crouchHeight: 6
+            vy: 0,
+            scaleX: 1, scaleY: 1,
+            targetScaleX: 1, targetScaleY: 1,
+            wobble: 0,
+            wasOnGround: false
         };
         
         const upperBody = {
             x: 200, y: 140,
-            vx: 0, vy: 0,
-            color: '#f39c12',
+            vy: 0, vx: 0,
             launched: false,
-            size: 8
+            scaleX: 1, scaleY: 1,
+            targetScaleX: 1, targetScaleY: 1,
+            wobble: 0
         };
         
         const fireballs = [];
         let mouseX = 0, mouseY = 0;
         const keys = { a: false, d: false, s: false, space: false };
         
-        // 像素绘制函数
         function drawPixel(x, y, size, color) {
             ctx.fillStyle = color;
             ctx.fillRect(Math.floor(x), Math.floor(y), size, size);
         }
         
-        // 绘制像素角色（合并状态）
-        function drawCharacterPixel(x, y, isLower, isCrouching, frame) {
-            const px = 1; // 像素大小
+        // 绘制果冻身体
+        function drawJellyBody(x, y, scaleX, scaleY, color, darkColor, isCrouching) {
+            const px = 1;
             const cx = Math.floor(x);
             const cy = Math.floor(y);
+            const bodyH = isCrouching ? 6 : Math.floor(16 * scaleY);
             
-            if (isLower) {
-                // 下半身 - 小动物的身体
-                const bodyH = isCrouching ? lowerBody.crouchHeight : lowerBody.height;
+            // 果冻形状（使用scale实现压扁拉伸）
+            const baseWidth = 12;
+            const width = Math.floor(baseWidth * scaleX);
+            const height = bodyH;
+            
+            // 主体（圆润的椭圆）
+            for (let by = 0; by < height; by++) {
+                // 果冻边缘曲线
+                const normalizedY = (by / height) - 0.5;
+                const edgeCurve = Math.sqrt(1 - Math.pow(normalizedY * 1.5, 2));
+                const rowWidth = Math.floor(width * edgeCurve);
+                const startX = cx - rowWidth / 2;
                 
-                // 身体（椭圆形像素）
-                const bodyColor = isCrouching ? '#c0392b' : '#e74c3c';
-                for (let by = 0; by < bodyH; by++) {
-                    const rowWidth = by < 2 ? 8 : (by < bodyH - 2 ? 12 : 8);
-                    const startX = cx - rowWidth / 2;
-                    for (let bx = 0; bx < rowWidth; bx++) {
-                        drawPixel(startX + bx, cy - bodyH + by, px, bodyColor);
+                for (let bx = 0; bx < rowWidth; bx++) {
+                    // 边缘抗锯齿
+                    const edgeDist = Math.abs(bx - rowWidth/2) / (rowWidth/2);
+                    if (edgeDist > 0.85 && Math.random() > 0.5) continue;
+                    
+                    // 高光
+                    if (bx < rowWidth * 0.3 && by < height * 0.4) {
+                        const highlight = Math.floor(80 + Math.random() * 30);
+                        ctx.fillStyle = `rgb(${highlight + 60}, ${highlight + 40}, ${highlight + 20})`;
+                    } else {
+                        ctx.fillStyle = by < height * 0.3 ? color : darkColor;
                     }
+                    drawPixel(startX + bx, cy - height + by, px, ctx.fillStyle);
                 }
-                
-                // 腿（行走动画）
-                if (!isCrouching && lowerBody.onGround) {
-                    const legOffset = Math.sin(walkCycle * 0.3) * 2;
-                    // 左腿
-                    drawPixel(cx - 4, cy - 2, px, '#c0392b');
-                    drawPixel(cx - 4 + legOffset, cy, px, '#c0392b');
-                    // 右腿
-                    drawPixel(cx + 3, cy - 2, px, '#c0392b');
-                    drawPixel(cx + 3 - legOffset, cy, px, '#c0392b');
-                } else if (isCrouching) {
-                    // 压扁时的腿
-                    drawPixel(cx - 5, cy - 2, px, '#c0392b');
-                    drawPixel(cx + 4, cy - 2, px, '#c0392b');
-                } else {
-                    // 空中腿
-                    drawPixel(cx - 4, cy, px, '#c0392b');
-                    drawPixel(cx + 3, cy, px, '#c0392b');
-                }
-                
-                // 尾巴
-                const tailWag = Math.sin(walkCycle * 0.2) * 1;
-                drawPixel(cx + 5, cy - 8 + tailWag, px, '#ff6b6b');
-                drawPixel(cx + 6, cy - 10 + tailWag, px, '#ff6b6b');
-            } else {
-                // 上半身 - 头部
-                const headColor = isCrouching ? '#d68910' : '#f39c12';
-                const size = upperBody.size;
-                
-                // 头（圆形像素）
-                for (let hy = 0; hy < size; hy++) {
-                    const rowWidth = size - Math.abs(hy - size/2);
-                    const startX = cx - rowWidth / 2;
-                    for (let hx = 0; hx < rowWidth; hx++) {
-                        // 边缘淡化
-                        const dist = Math.sqrt(Math.pow(hx - rowWidth/2, 2) + Math.pow(hy - size/2, 2));
-                        if (dist < size / 2) {
-                            drawPixel(startX + hx, cy - size + hy, px, headColor);
-                        }
-                    }
-                }
-                
-                // 眼睛
-                const blinkFrame = frame % 100 < 5;
-                if (!blinkFrame) {
-                    drawPixel(cx - 3, cy - 3, px, '#fff');
-                    drawPixel(cx + 2, cy - 3, px, '#fff');
-                    drawPixel(cx - 2, cy - 2, px, '#333');
-                    drawPixel(cx + 3, cy - 2, px, '#333');
-                } else {
-                    // 眨眼
-                    drawPixel(cx - 3, cy - 2, px, '#333');
-                    drawPixel(cx + 2, cy - 2, px, '#333');
-                }
-                
-                // 嘴巴（蓄力时张嘴）
-                if (isCharging) {
-                    drawPixel(cx - 1, cy + 1, px, '#c0392b');
-                    drawPixel(cx, cy + 2, px, '#c0392b');
-                    drawPixel(cx + 1, cy + 1, px, '#c0392b');
-                } else {
-                    drawPixel(cx, cy + 1, px, '#c0392b');
-                }
-                
-                // 耳朵/角
-                drawPixel(cx - 4, cy - 8, px, headColor);
-                drawPixel(cx + 3, cy - 8, px, headColor);
+            }
+            
+            // 腮红
+            if (!isCrouching) {
+                drawPixel(cx - 5, cy - 6, px, '#ff9999');
+                drawPixel(cx + 4, cy - 6, px, '#ff9999');
             }
         }
         
-        // 绘制飞行状态的上半身
-        function drawFlyingUpper() {
-            const x = Math.floor(upperBody.x);
-            const y = Math.floor(upperBody.y);
-            const size = upperBody.size;
+        // 绘制果冻头
+        function drawJellyHead(x, y, scaleX, scaleY, color, isFlying) {
             const px = 1;
+            const cx = Math.floor(x);
+            const cy = Math.floor(y);
+            const size = Math.floor(9 * Math.min(scaleX, scaleY));
             
-            // 飞行时的表情（兴奋）
-            const headColor = '#f39c12';
+            // 果冻圆形头
             for (let hy = 0; hy < size; hy++) {
-                const rowWidth = size - Math.abs(hy - size/2);
-                const startX = x - rowWidth / 2;
+                const normalizedY = (hy / size) - 0.5;
+                const edgeCurve = Math.sqrt(1 - Math.pow(normalizedY * 1.2, 2));
+                const rowWidth = Math.floor(size * edgeCurve);
+                const startX = cx - rowWidth / 2;
+                
                 for (let hx = 0; hx < rowWidth; hx++) {
-                    const dist = Math.sqrt(Math.pow(hx - rowWidth/2, 2) + Math.pow(hy - size/2, 2));
-                    if (dist < size / 2) {
-                        drawPixel(startX + hx, y - size + hy, px, headColor);
+                    const edgeDist = Math.sqrt(Math.pow((hx - rowWidth/2) / (rowWidth/2), 2) + Math.pow((hy - size/2) / (size/2), 2));
+                    if (edgeDist > 1) continue;
+                    
+                    // 高光
+                    if (hx < rowWidth * 0.35 && hy < size * 0.4) {
+                        const highlight = Math.floor(100 + Math.random() * 40);
+                        ctx.fillStyle = `rgb(${highlight + 50}, ${highlight + 80}, ${highlight})`;
+                    } else {
+                        ctx.fillStyle = color;
                     }
+                    drawPixel(startX + hx, cy - size + hy, px, ctx.fillStyle);
                 }
             }
             
-            // 眼睛（开心）
-            drawPixel(x - 3, y - 3, px, '#fff');
-            drawPixel(x + 2, y - 3, px, '#fff');
-            drawPixel(x - 2, y - 2, px, '#333');
-            drawPixel(x + 3, y - 2, px, '#333');
+            // 眼睛（眨眼）
+            const blinkFrame = animFrame % 120 < 6;
+            if (!blinkFrame) {
+                // 大眼睛
+                drawPixel(cx - 3, cy - 2, px, '#fff');
+                drawPixel(cx + 2, cy - 2, px, '#fff');
+                drawPixel(cx - 2, cy - 1, px, '#333');
+                drawPixel(cx + 3, cy - 1, px, '#333');
+                // 眼神光
+                drawPixel(cx - 1, cy - 2, px, '#fff');
+                drawPixel(cx + 4, cy - 2, px, '#fff');
+            } else {
+                // 眨眼
+                drawPixel(cx - 3, cy - 1, px, '#333');
+                drawPixel(cx + 2, cy - 1, px, '#333');
+            }
             
-            // 张嘴笑
-            drawPixel(x - 2, y + 1, px, '#c0392b');
-            drawPixel(x - 1, y + 2, px, '#c0392b');
-            drawPixel(x, y + 2, px, '#c0392b');
-            drawPixel(x + 1, y + 2, px, '#c0392b');
-            drawPixel(x + 2, y + 1, px, '#c0392b');
+            // 嘴巴
+            if (isFlying || isCharging) {
+                // 张嘴（兴奋）
+                drawPixel(cx - 2, cy + 2, px, '#c0392b');
+                drawPixel(cx, cy + 3, px, '#c0392b');
+                drawPixel(cx + 1, cy + 2, px, '#c0392b');
+            } else {
+                // 小嘴
+                drawPixel(cx, cy + 2, px, '#c0392b');
+            }
             
             // 耳朵
-            drawPixel(x - 4, y - 8, px, headColor);
-            drawPixel(x + 3, y - 8, px, headColor);
+            const earWobble = Math.sin(animFrame * 0.15) * scaleX * 1;
+            drawPixel(cx - 4 + earWobble, cy - size - 1, px, color);
+            drawPixel(cx + 3 - earWobble, cy - size - 1, px, color);
+        }
+        
+        // 绘制腿
+        function drawJellyLegs(x, y, scaleX, isCrouching, isMoving) {
+            const px = 1;
+            const cx = Math.floor(x);
+            const cy = Math.floor(y);
+            const legY = isCrouching ? cy - 2 : cy;
+            
+            if (isCrouching) {
+                // 压扁时的短腿
+                drawPixel(cx - 4, legY, px, '#c0392b');
+                drawPixel(cx + 3, legY, px, '#c0392b');
+            } else if (isMoving) {
+                // 走路弹跳
+                const legBounce = Math.abs(Math.sin(walkCycle * 0.4)) * 2;
+                const legOffset = Math.sin(walkCycle * 0.4) * 2;
+                drawPixel(cx - 4 + legOffset, legY - legBounce, px, '#c0392b');
+                drawPixel(cx + 3 - legOffset, legY - legBounce, px, '#c0392b');
+            } else {
+                // 站立
+                drawPixel(cx - 4, cy, px, '#c0392b');
+                drawPixel(cx + 3, cy, px, '#c0392b');
+            }
+        }
+        
+        // 果冻物理更新
+        function updateJelly(obj, groundY, isOnGround) {
+            // 落地检测
+            if (isOnGround && !obj.wasOnGround) {
+                // 落地压扁
+                obj.targetScaleX = 1.4;
+                obj.targetScaleY = 0.6;
+                obj.wobble = 1;
+            }
+            obj.wasOnGround = isOnGround;
+            
+            // 空中拉伸/压扁
+            if (!isOnGround && obj.vy < -2) {
+                // 上升时拉伸
+                obj.targetScaleX = 0.8;
+                obj.targetScaleY = 1.3;
+            } else if (!isOnGround && obj.vy > 2) {
+                // 下落时压扁
+                obj.targetScaleX = 0.9;
+                obj.targetScaleY = 1.1;
+            } else if (isOnGround) {
+                // 站立恢复
+                obj.targetScaleX = 1;
+                obj.targetScaleY = 1;
+            }
+            
+            // 弹性恢复
+            obj.scaleX += (obj.targetScaleX - obj.scaleX) * 0.2;
+            obj.scaleY += (obj.targetScaleY - obj.scaleY) * 0.2;
+            
+            // 晃动衰减
+            obj.wobble *= 0.9;
         }
         
         document.addEventListener('keydown', (e) => {
             if (e.code === 'KeyA') keys.a = true;
             if (e.code === 'KeyD') keys.d = true;
             if (e.code === 'KeyS') { 
-                if (!keys.s && lowerBody.onGround) {
+                if (!keys.s && jellyLower.y >= GROUND_Y - 1) {
                     isCrouching = true;
-                    crouchFrames = 0;
                 }
                 keys.s = true; 
             }
@@ -243,25 +278,19 @@
             if (e.code === 'KeyS') { 
                 keys.s = false; 
                 isCrouching = false;
-                crouchFrames = 0;
             }
             if (e.code === 'Space') {
                 if (keys.space) {
-                    console.log(`KeyUp: isSeparated=${isSeparated}, launched=${upperBody.launched}, holdFrames=${holdFrames}, onGround=${lowerBody.onGround}`);
-                    
                     if (wasSeparating && isSeparated) {
-                        console.log("发射上半身");
                         launchUpperBody();
-                    } else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lowerBody.onGround) {
-                        // 合并状态短按 = 跳跃
-                        console.log("合并状态跳跃");
-                        lowerBody.vy = -JUMP_POWER;
-                        lowerBody.onGround = false;
-                    } else if (isSeparated && lowerBody.onGround) {
-                        // 分离状态短按 = 下身跳跃（简化条件）
-                        console.log("分离状态跳跃");
-                        lowerBody.vy = -JUMP_POWER;
-                        lowerBody.onGround = false;
+                    } else if (!isSeparated && holdFrames < HOLD_THRESHOLD && jellyLower.y >= GROUND_Y - 1) {
+                        jellyLower.vy = -JUMP_POWER;
+                        jellyLower.targetScaleX = 0.7;
+                        jellyLower.targetScaleY = 1.4;
+                    } else if (isSeparated && jellyLower.y >= GROUND_Y - 1) {
+                        jellyLower.vy = -JUMP_POWER;
+                        jellyLower.targetScaleX = 0.7;
+                        jellyLower.targetScaleY = 1.4;
                     }
                     keys.space = false;
                     isCharging = false;
@@ -287,22 +316,26 @@
             upperBody.vx = Math.cos(angle) * power;
             upperBody.vy = Math.sin(angle) * power;
             upperBody.launched = true;
+            upperBody.targetScaleX = 0.8;
+            upperBody.targetScaleY = 1.3;
             isCharging = false;
             chargePower = 0;
         }
         
         function tryMerge() {
-            const dx = lowerBody.x - upperBody.x;
-            const dy = lowerBody.y - upperBody.y;
+            const dx = jellyLower.x - upperBody.x;
+            const dy = jellyLower.y - upperBody.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
-            if (dist < 40) {
+            if (dist < 50) {
                 isSeparated = false;
                 upperBody.launched = false;
-                upperBody.x = lowerBody.x;
-                upperBody.y = lowerBody.y - 20;
+                upperBody.x = jellyLower.x;
+                upperBody.y = jellyLower.y - 22;
                 upperBody.vx = 0;
                 upperBody.vy = 0;
+                upperBody.scaleX = 1;
+                upperBody.scaleY = 1;
             }
         }
         
@@ -320,41 +353,53 @@
         
         function update() {
             animFrame++;
-            if (keys.a || keys.d) walkCycle++;
             
-            // 压扁状态
-            if (isCrouching && keys.s) {
-                crouchFrames++;
+            const isMoving = keys.a || keys.d;
+            if (isMoving) {
+                walkCycle++;
+                // 移动时果冻晃动
+                jellyLower.wobble = Math.max(jellyLower.wobble, 0.3);
+                upperBody.wobble = Math.max(upperBody.wobble, 0.2);
             }
             
             // 下半身移动
             if (!isSeparated) {
-                if (keys.a) lowerBody.x -= MOVE_SPEED;
-                if (keys.d) lowerBody.x += MOVE_SPEED;
+                if (keys.a) jellyLower.x -= MOVE_SPEED;
+                if (keys.d) jellyLower.x += MOVE_SPEED;
             } else {
-                // 分离后下身只能原地待着或被上半身拽动
-                if (keys.a) lowerBody.x -= MOVE_SPEED * 0.5;
-                if (keys.d) lowerBody.x += MOVE_SPEED * 0.5;
+                if (keys.a) jellyLower.x -= MOVE_SPEED * 0.6;
+                if (keys.d) jellyLower.x += MOVE_SPEED * 0.6;
             }
             
             // 重力
-            lowerBody.vy += GRAVITY;
-            lowerBody.y += lowerBody.vy;
+            jellyLower.vy += GRAVITY;
+            jellyLower.y += jellyLower.vy;
             
-            const groundY = 220;
-            if (lowerBody.y > groundY) {
-                lowerBody.y = groundY;
-                lowerBody.vy = 0;
-                lowerBody.onGround = true;
-            } else {
-                lowerBody.onGround = false;
+            // 地面碰撞
+            if (jellyLower.y > GROUND_Y) {
+                jellyLower.y = GROUND_Y;
+                jellyLower.vy = 0;
             }
             
-            // 头的位置（压扁时头也降低）
+            // 压扁效果
+            if (isCrouching && jellyLower.y >= GROUND_Y - 1) {
+                jellyLower.targetScaleX = 1.5;
+                jellyLower.targetScaleY = 0.4;
+                jellyLower.y = GROUND_Y + 4; // 稍微陷进去
+            } else if (jellyLower.y >= GROUND_Y - 1) {
+                jellyLower.targetScaleY = 1;
+            }
+            
+            // 果冻物理
+            const isOnGround = jellyLower.y >= GROUND_Y - 1;
+            updateJelly(jellyLower, GROUND_Y, isOnGround);
+            
+            // 头的位置
             if (!isSeparated) {
-                upperBody.x = lowerBody.x;
-                const headOffset = isCrouching ? 10 : 20; // 压扁时头更低
-                upperBody.y = lowerBody.y - headOffset;
+                upperBody.x = jellyLower.x;
+                upperBody.y = jellyLower.y - 20 * jellyLower.scaleY;
+                upperBody.scaleX = jellyLower.scaleX;
+                upperBody.scaleY = jellyLower.scaleY;
             }
             
             // 蓄力检测
@@ -365,10 +410,11 @@
                 if (holdFrames >= HOLD_THRESHOLD) {
                     isSeparated = true;
                     upperBody.launched = false;
-                    upperBody.x = lowerBody.x;
-                    upperBody.y = lowerBody.y - 20;
+                    upperBody.x = jellyLower.x;
+                    upperBody.y = jellyLower.y - 20;
                     wasSeparating = true;
                     isCharging = false;
+                    chargePower = 0;
                 }
             }
             
@@ -378,17 +424,24 @@
                     upperBody.x += upperBody.vx;
                     upperBody.y += upperBody.vy;
                     
-                    if (upperBody.y > groundY) {
-                        upperBody.y = groundY;
-                        upperBody.vy = 0;
-                        upperBody.vx *= 0.7;
+                    // 飞行中果冻变形
+                    updateJelly(upperBody, GROUND_Y, upperBody.y >= GROUND_Y - 1);
+                    
+                    if (upperBody.y > GROUND_Y) {
+                        upperBody.y = GROUND_Y;
+                        upperBody.vy *= -0.3;
+                        upperBody.vx *= 0.8;
+                        upperBody.scaleX = 1.3;
+                        upperBody.scaleY = 0.7;
                     }
                     
-                    if (upperBody.x < 8) { upperBody.x = 8; upperBody.vx *= -0.5; }
-                    if (upperBody.x > 392) { upperBody.x = 392; upperBody.vx *= -0.5; }
+                    if (upperBody.x < 10) { upperBody.x = 10; upperBody.vx *= -0.5; }
+                    if (upperBody.x > 390) { upperBody.x = 390; upperBody.vx *= -0.5; }
                 } else {
-                    upperBody.x = lowerBody.x;
-                    upperBody.y = lowerBody.y - 20;
+                    upperBody.x = jellyLower.x;
+                    upperBody.y = jellyLower.y - 20;
+                    upperBody.scaleX = jellyLower.scaleX;
+                    upperBody.scaleY = jellyLower.scaleY;
                 }
             }
             
@@ -405,56 +458,61 @@
                 }
             }
             
-            lowerBody.x = Math.max(10, Math.min(390, lowerBody.x));
+            jellyLower.x = Math.max(15, Math.min(385, jellyLower.x));
         }
         
         function draw() {
-            // 清屏（深色背景）
+            // 深色背景
             ctx.fillStyle = '#1a1a2e';
             ctx.fillRect(0, 0, 400, 250);
             
-            // 背景装饰（星星/粒子）
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            for (let i = 0; i < 20; i++) {
-                const sx = (i * 73 + animFrame * 0.1) % 400;
-                const sy = (i * 47) % 150;
+            // 背景星星
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            for (let i = 0; i < 30; i++) {
+                const sx = (i * 73 + animFrame * 0.05) % 400;
+                const sy = (i * 47) % 160;
+                const twinkle = Math.sin(animFrame * 0.1 + i) * 0.5 + 0.5;
+                ctx.globalAlpha = twinkle * 0.5;
                 ctx.fillRect(Math.floor(sx), Math.floor(sy), 1, 1);
             }
+            ctx.globalAlpha = 1;
             
             // 地面
             ctx.fillStyle = '#3d3d5c';
-            ctx.fillRect(0, 220, 400, 30);
+            ctx.fillRect(0, GROUND_Y, 400, 30);
             
             // 地面纹理
             ctx.fillStyle = '#4a4a6a';
             for (let gx = 0; gx < 400; gx += 16) {
-                ctx.fillRect(gx, 220, 8, 2);
-                ctx.fillRect(gx + 4, 228, 8, 2);
+                ctx.fillRect(gx, GROUND_Y, 8, 2);
             }
             
-            // 绘制角色
+            const isMoving = keys.a || keys.d;
+            
             if (isSeparated) {
-                // 下半身
-                drawCharacterPixel(lowerBody.x, lowerBody.y, true, isCrouching, animFrame);
+                // 下半身（果冻身体）
+                drawJellyBody(jellyLower.x, jellyLower.y, jellyLower.scaleX, jellyLower.scaleY, '#e74c3c', '#c0392b', isCrouching);
+                drawJellyLegs(jellyLower.x, jellyLower.y, jellyLower.scaleX, isCrouching, isMoving);
                 
-                // 上半身（飞行）
+                // 上半身（果冻头）
                 if (upperBody.launched) {
-                    drawFlyingUpper();
+                    drawJellyHead(upperBody.x, upperBody.y, upperBody.scaleX, upperBody.scaleY, '#f39c12', true);
                 }
             } else {
                 // 合并状态
-                drawCharacterPixel(lowerBody.x, lowerBody.y, true, isCrouching, animFrame);
-                // 头位置根据压扁状态调整
-                const headY = isCrouching ? lowerBody.y - 10 : upperBody.y;
-                drawCharacterPixel(upperBody.x, headY, false, isCrouching, animFrame);
+                drawJellyBody(jellyLower.x, jellyLower.y, jellyLower.scaleX, jellyLower.scaleY, '#e74c3c', '#c0392b', isCrouching);
+                drawJellyLegs(jellyLower.x, jellyLower.y, jellyLower.scaleX, isCrouching, isMoving);
+                
+                const headY = isCrouching ? jellyLower.y - 8 : upperBody.y;
+                drawJellyHead(upperBody.x, headY, jellyLower.scaleX, jellyLower.scaleY, '#f39c12', false);
                 
                 // 蓄力圈
                 if (isCharging && holdFrames > 0) {
                     const progress = Math.min(holdFrames / HOLD_THRESHOLD, 1);
                     ctx.strokeStyle = `rgba(255, 255, 0, ${progress * 0.8})`;
-                    ctx.lineWidth = 1;
+                    ctx.lineWidth = 2;
                     ctx.beginPath();
-                    ctx.arc(lowerBody.x, lowerBody.y - 20, 12 + progress * 6, 0, Math.PI * 2 * progress);
+                    ctx.arc(jellyLower.x, jellyLower.y - 20, 14 + progress * 8, 0, Math.PI * 2 * progress);
                     ctx.stroke();
                 }
             }
@@ -493,20 +551,14 @@
             ctx.fillText('小小跳跃', 4, 10);
             
             if (isSeparated) {
-                if (upperBody.launched) {
-                    ctx.fillText('飞行中 | 空格融合', 4, 240);
-                } else {
-                    ctx.fillText('分离 | 空格融合', 4, 240);
-                }
+                ctx.fillText('分离模式 | 空格融合', 4, 240);
+            } else if (isCrouching) {
+                ctx.fillText('压扁中...', 4, 240);
+            } else if (isCharging) {
+                const p = Math.round(Math.min(holdFrames / HOLD_THRESHOLD * 100, 100));
+                ctx.fillText(`蓄力 ${p}%`, 4, 240);
             } else {
-                if (isCharging) {
-                    const p = Math.round(Math.min(holdFrames / HOLD_THRESHOLD * 100, 100));
-                    ctx.fillText(`蓄力 ${p}%`, 4, 240);
-                } else if (isCrouching) {
-                    ctx.fillText('压扁中', 4, 240);
-                } else {
-                    ctx.fillText('空格跳跃/分离', 4, 240);
-                }
+                ctx.fillText('空格跳跃/分离', 4, 240);
             }
         }
         
