@@ -14,19 +14,13 @@
             min-height: 100vh;
             flex-direction: column;
         }
-        canvas { 
-            image-rendering: pixelated;
-            image-rendering: crisp-edges;
-            background: #2d2d44; 
-            border: 2px solid #444;
-            cursor: crosshair;
-        }
+        canvas { background: #2d2d44; border: 2px solid #444; cursor: crosshair; }
         #info { color: #888; font-size: 14px; margin-top: 10px; text-align: center; }
         #controls { color: #aaa; font-size: 12px; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <canvas id="game" width="400" height="250"></canvas>
+    <canvas id="game" width="800" height="500"></canvas>
     <div id="info">短按空格跳跃 | 长按空格分离+发射上半身 | 分离后短按空格融合</div>
     <div id="controls">A/D移动 | S压扁 | 鼠标瞄准 | 左键发射火球</div>
     
@@ -34,17 +28,11 @@
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         
-        const SCALE = 2;
-        canvas.style.width = canvas.width * SCALE + 'px';
-        canvas.style.height = canvas.height * SCALE + 'px';
-        
         const GRAVITY = 0.5;
-        const MAX_POWER = 12;
-        const POWER_RATE = 0.2;
-        const JUMP_POWER = 10;
+        const MAX_POWER = 15;
+        const POWER_RATE = 0.3;
+        const JUMP_POWER = 12;
         const HOLD_THRESHOLD = 15;
-        const MOVE_SPEED = 2.5;
-        const GROUND_Y = 220;
         
         let isSeparated = false;
         let isCharging = false;
@@ -52,210 +40,30 @@
         let holdFrames = 0;
         let wasSeparating = false;
         let isCrouching = false;
-        let animFrame = 0;
-        let walkCycle = 0;
         
-        // 果冻物理状态
-        const jellyLower = {
-            x: 200, y: 160,
+        // 下半身
+        const lower = {
+            x: 400, y: 350,
             vy: 0,
-            scaleX: 1, scaleY: 1,
-            targetScaleX: 1, targetScaleY: 1,
-            wobble: 0,
-            wasOnGround: false
+            onGround: false,
+            crouchHeight: 20
         };
         
-        const upperBody = {
-            x: 200, y: 140,
-            vy: 0, vx: 0,
-            launched: false,
-            scaleX: 1, scaleY: 1,
-            targetScaleX: 1, targetScaleY: 1,
-            wobble: 0
+        // 上半身
+        const upper = {
+            x: 400, y: 300,
+            vx: 0, vy: 0,
+            launched: false
         };
         
         const fireballs = [];
-        let mouseX = 0, mouseY = 0;
+        let mouseX = 400, mouseY = 250;
         const keys = { a: false, d: false, s: false, space: false };
-        
-        function drawPixel(x, y, size, color) {
-            ctx.fillStyle = color;
-            ctx.fillRect(Math.floor(x), Math.floor(y), size, size);
-        }
-        
-        // 绘制果冻身体
-        function drawJellyBody(x, y, scaleX, scaleY, color, darkColor, isCrouching) {
-            const px = 1;
-            const cx = Math.floor(x);
-            const cy = Math.floor(y);
-            const bodyH = isCrouching ? 6 : Math.floor(16 * scaleY);
-            
-            // 果冻形状（使用scale实现压扁拉伸）
-            const baseWidth = 12;
-            const width = Math.floor(baseWidth * scaleX);
-            const height = bodyH;
-            
-            // 主体（圆润的椭圆）
-            for (let by = 0; by < height; by++) {
-                // 果冻边缘曲线
-                const normalizedY = (by / height) - 0.5;
-                const edgeCurve = Math.sqrt(1 - Math.pow(normalizedY * 1.5, 2));
-                const rowWidth = Math.floor(width * edgeCurve);
-                const startX = cx - rowWidth / 2;
-                
-                for (let bx = 0; bx < rowWidth; bx++) {
-                    // 边缘抗锯齿
-                    const edgeDist = Math.abs(bx - rowWidth/2) / (rowWidth/2);
-                    if (edgeDist > 0.85 && Math.random() > 0.5) continue;
-                    
-                    // 高光
-                    if (bx < rowWidth * 0.3 && by < height * 0.4) {
-                        const highlight = Math.floor(80 + Math.random() * 30);
-                        ctx.fillStyle = `rgb(${highlight + 60}, ${highlight + 40}, ${highlight + 20})`;
-                    } else {
-                        ctx.fillStyle = by < height * 0.3 ? color : darkColor;
-                    }
-                    drawPixel(startX + bx, cy - height + by, px, ctx.fillStyle);
-                }
-            }
-            
-            // 腮红
-            if (!isCrouching) {
-                drawPixel(cx - 5, cy - 6, px, '#ff9999');
-                drawPixel(cx + 4, cy - 6, px, '#ff9999');
-            }
-        }
-        
-        // 绘制果冻头
-        function drawJellyHead(x, y, scaleX, scaleY, color, isFlying) {
-            const px = 1;
-            const cx = Math.floor(x);
-            const cy = Math.floor(y);
-            const size = Math.floor(9 * Math.min(scaleX, scaleY));
-            
-            // 果冻圆形头
-            for (let hy = 0; hy < size; hy++) {
-                const normalizedY = (hy / size) - 0.5;
-                const edgeCurve = Math.sqrt(1 - Math.pow(normalizedY * 1.2, 2));
-                const rowWidth = Math.floor(size * edgeCurve);
-                const startX = cx - rowWidth / 2;
-                
-                for (let hx = 0; hx < rowWidth; hx++) {
-                    const edgeDist = Math.sqrt(Math.pow((hx - rowWidth/2) / (rowWidth/2), 2) + Math.pow((hy - size/2) / (size/2), 2));
-                    if (edgeDist > 1) continue;
-                    
-                    // 高光
-                    if (hx < rowWidth * 0.35 && hy < size * 0.4) {
-                        const highlight = Math.floor(100 + Math.random() * 40);
-                        ctx.fillStyle = `rgb(${highlight + 50}, ${highlight + 80}, ${highlight})`;
-                    } else {
-                        ctx.fillStyle = color;
-                    }
-                    drawPixel(startX + hx, cy - size + hy, px, ctx.fillStyle);
-                }
-            }
-            
-            // 眼睛（眨眼）
-            const blinkFrame = animFrame % 120 < 6;
-            if (!blinkFrame) {
-                // 大眼睛
-                drawPixel(cx - 3, cy - 2, px, '#fff');
-                drawPixel(cx + 2, cy - 2, px, '#fff');
-                drawPixel(cx - 2, cy - 1, px, '#333');
-                drawPixel(cx + 3, cy - 1, px, '#333');
-                // 眼神光
-                drawPixel(cx - 1, cy - 2, px, '#fff');
-                drawPixel(cx + 4, cy - 2, px, '#fff');
-            } else {
-                // 眨眼
-                drawPixel(cx - 3, cy - 1, px, '#333');
-                drawPixel(cx + 2, cy - 1, px, '#333');
-            }
-            
-            // 嘴巴
-            if (isFlying || isCharging) {
-                // 张嘴（兴奋）
-                drawPixel(cx - 2, cy + 2, px, '#c0392b');
-                drawPixel(cx, cy + 3, px, '#c0392b');
-                drawPixel(cx + 1, cy + 2, px, '#c0392b');
-            } else {
-                // 小嘴
-                drawPixel(cx, cy + 2, px, '#c0392b');
-            }
-            
-            // 耳朵
-            const earWobble = Math.sin(animFrame * 0.15) * scaleX * 1;
-            drawPixel(cx - 4 + earWobble, cy - size - 1, px, color);
-            drawPixel(cx + 3 - earWobble, cy - size - 1, px, color);
-        }
-        
-        // 绘制腿
-        function drawJellyLegs(x, y, scaleX, isCrouching, isMoving) {
-            const px = 1;
-            const cx = Math.floor(x);
-            const cy = Math.floor(y);
-            const legY = isCrouching ? cy - 2 : cy;
-            
-            if (isCrouching) {
-                // 压扁时的短腿
-                drawPixel(cx - 4, legY, px, '#c0392b');
-                drawPixel(cx + 3, legY, px, '#c0392b');
-            } else if (isMoving) {
-                // 走路弹跳
-                const legBounce = Math.abs(Math.sin(walkCycle * 0.4)) * 2;
-                const legOffset = Math.sin(walkCycle * 0.4) * 2;
-                drawPixel(cx - 4 + legOffset, legY - legBounce, px, '#c0392b');
-                drawPixel(cx + 3 - legOffset, legY - legBounce, px, '#c0392b');
-            } else {
-                // 站立
-                drawPixel(cx - 4, cy, px, '#c0392b');
-                drawPixel(cx + 3, cy, px, '#c0392b');
-            }
-        }
-        
-        // 果冻物理更新
-        function updateJelly(obj, groundY, isOnGround) {
-            // 落地检测
-            if (isOnGround && !obj.wasOnGround) {
-                // 落地压扁
-                obj.targetScaleX = 1.4;
-                obj.targetScaleY = 0.6;
-                obj.wobble = 1;
-            }
-            obj.wasOnGround = isOnGround;
-            
-            // 空中拉伸/压扁
-            if (!isOnGround && obj.vy < -2) {
-                // 上升时拉伸
-                obj.targetScaleX = 0.8;
-                obj.targetScaleY = 1.3;
-            } else if (!isOnGround && obj.vy > 2) {
-                // 下落时压扁
-                obj.targetScaleX = 0.9;
-                obj.targetScaleY = 1.1;
-            } else if (isOnGround) {
-                // 站立恢复
-                obj.targetScaleX = 1;
-                obj.targetScaleY = 1;
-            }
-            
-            // 弹性恢复
-            obj.scaleX += (obj.targetScaleX - obj.scaleX) * 0.2;
-            obj.scaleY += (obj.targetScaleY - obj.scaleY) * 0.2;
-            
-            // 晃动衰减
-            obj.wobble *= 0.9;
-        }
         
         document.addEventListener('keydown', (e) => {
             if (e.code === 'KeyA') keys.a = true;
             if (e.code === 'KeyD') keys.d = true;
-            if (e.code === 'KeyS') { 
-                if (!keys.s && jellyLower.y >= GROUND_Y - 1) {
-                    isCrouching = true;
-                }
-                keys.s = true; 
-            }
+            if (e.code === 'KeyS') { keys.s = true; isCrouching = true; }
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (!keys.space) {
@@ -264,9 +72,10 @@
                     isCharging = true;
                     wasSeparating = false;
                     
-                    if (isSeparated && upperBody.launched) {
-                        tryMerge();
-                        isCharging = false;
+                    // 分离状态短按空格 = 下半身跳跃
+                    if (isSeparated && lower.onGround) {
+                        lower.vy = -JUMP_POWER;
+                        lower.onGround = false;
                     }
                 }
             }
@@ -275,25 +84,26 @@
         document.addEventListener('keyup', (e) => {
             if (e.code === 'KeyA') keys.a = false;
             if (e.code === 'KeyD') keys.d = false;
-            if (e.code === 'KeyS') { 
-                keys.s = false; 
-                isCrouching = false;
-            }
+            if (e.code === 'KeyS') { keys.s = false; isCrouching = false; }
             if (e.code === 'Space') {
                 if (keys.space) {
+                    // 长按后松开 = 发射上半身
                     if (wasSeparating && isSeparated) {
-                        launchUpperBody();
-                    } else if (!isSeparated && holdFrames < HOLD_THRESHOLD && jellyLower.y >= GROUND_Y - 1) {
-                        jellyLower.vy = -JUMP_POWER;
-                        jellyLower.targetScaleX = 0.7;
-                        jellyLower.targetScaleY = 1.4;
-                    } else if (isSeparated && jellyLower.y >= GROUND_Y - 1) {
-                        jellyLower.vy = -JUMP_POWER;
-                        jellyLower.targetScaleX = 0.7;
-                        jellyLower.targetScaleY = 1.4;
+                        const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
+                        const power = Math.min(chargePower, MAX_POWER);
+                        upper.vx = Math.cos(angle) * power;
+                        upper.vy = Math.sin(angle) * power;
+                        upper.launched = true;
                     }
+                    // 合并状态短按 = 跳跃
+                    else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lower.onGround) {
+                        lower.vy = -JUMP_POWER;
+                        lower.onGround = false;
+                    }
+                    
                     keys.space = false;
                     isCharging = false;
+                    chargePower = 0;
                     holdFrames = 0;
                     wasSeparating = false;
                 }
@@ -302,104 +112,57 @@
         
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
-            mouseX = (e.clientX - rect.left) / SCALE;
-            mouseY = (e.clientY - rect.top) / SCALE;
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
         });
         
         canvas.addEventListener('mousedown', (e) => {
             if (e.button === 0) shootFireball();
         });
         
-        function launchUpperBody() {
-            const angle = Math.atan2(mouseY - upperBody.y, mouseX - upperBody.x);
-            const power = Math.min(chargePower, MAX_POWER);
-            upperBody.vx = Math.cos(angle) * power;
-            upperBody.vy = Math.sin(angle) * power;
-            upperBody.launched = true;
-            upperBody.targetScaleX = 0.8;
-            upperBody.targetScaleY = 1.3;
-            isCharging = false;
-            chargePower = 0;
-        }
-        
-        function tryMerge() {
-            const dx = jellyLower.x - upperBody.x;
-            const dy = jellyLower.y - upperBody.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            
-            if (dist < 50) {
-                isSeparated = false;
-                upperBody.launched = false;
-                upperBody.x = jellyLower.x;
-                upperBody.y = jellyLower.y - 22;
-                upperBody.vx = 0;
-                upperBody.vy = 0;
-                upperBody.scaleX = 1;
-                upperBody.scaleY = 1;
-            }
-        }
-        
         function shootFireball() {
-            const angle = Math.atan2(mouseY - upperBody.y, mouseX - upperBody.x);
+            const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
             fireballs.push({
-                x: upperBody.x,
-                y: upperBody.y,
-                vx: Math.cos(angle) * 6,
-                vy: Math.sin(angle) * 6,
-                radius: 4,
-                life: 80
+                x: upper.x, y: upper.y,
+                vx: Math.cos(angle) * 10,
+                vy: Math.sin(angle) * 10,
+                radius: 6, life: 80
             });
         }
         
+        function tryMerge() {
+            const dx = lower.x - upper.x;
+            const dy = lower.y - upper.y;
+            if (Math.sqrt(dx*dx + dy*dy) < 50) {
+                isSeparated = false;
+                upper.launched = false;
+                upper.x = lower.x;
+                upper.y = lower.y - 40;
+            }
+        }
+        
         function update() {
-            animFrame++;
-            
-            const isMoving = keys.a || keys.d;
-            if (isMoving) {
-                walkCycle++;
-                // 移动时果冻晃动
-                jellyLower.wobble = Math.max(jellyLower.wobble, 0.3);
-                upperBody.wobble = Math.max(upperBody.wobble, 0.2);
-            }
-            
-            // 下半身移动
-            if (!isSeparated) {
-                if (keys.a) jellyLower.x -= MOVE_SPEED;
-                if (keys.d) jellyLower.x += MOVE_SPEED;
-            } else {
-                if (keys.a) jellyLower.x -= MOVE_SPEED * 0.6;
-                if (keys.d) jellyLower.x += MOVE_SPEED * 0.6;
-            }
+            // 移动
+            if (keys.a) lower.x -= 5;
+            if (keys.d) lower.x += 5;
             
             // 重力
-            jellyLower.vy += GRAVITY;
-            jellyLower.y += jellyLower.vy;
+            lower.vy += GRAVITY;
+            lower.y += lower.vy;
             
-            // 地面碰撞
-            if (jellyLower.y > GROUND_Y) {
-                jellyLower.y = GROUND_Y;
-                jellyLower.vy = 0;
+            const groundY = 450;
+            if (lower.y >= groundY) {
+                lower.y = groundY;
+                lower.vy = 0;
+                lower.onGround = true;
+            } else {
+                lower.onGround = false;
             }
-            
-            // 压扁效果
-            if (isCrouching && jellyLower.y >= GROUND_Y - 1) {
-                jellyLower.targetScaleX = 1.5;
-                jellyLower.targetScaleY = 0.4;
-                jellyLower.y = GROUND_Y + 4; // 稍微陷进去
-            } else if (jellyLower.y >= GROUND_Y - 1) {
-                jellyLower.targetScaleY = 1;
-            }
-            
-            // 果冻物理
-            const isOnGround = jellyLower.y >= GROUND_Y - 1;
-            updateJelly(jellyLower, GROUND_Y, isOnGround);
             
             // 头的位置
             if (!isSeparated) {
-                upperBody.x = jellyLower.x;
-                upperBody.y = jellyLower.y - 20 * jellyLower.scaleY;
-                upperBody.scaleX = jellyLower.scaleX;
-                upperBody.scaleY = jellyLower.scaleY;
+                upper.x = lower.x;
+                upper.y = isCrouching ? lower.y - 25 : lower.y - 50;
             }
             
             // 蓄力检测
@@ -408,41 +171,32 @@
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
                 if (holdFrames >= HOLD_THRESHOLD) {
+                    // 达到阈值，分离
                     isSeparated = true;
-                    upperBody.launched = false;
-                    upperBody.x = jellyLower.x;
-                    upperBody.y = jellyLower.y - 20;
+                    upper.launched = false;
+                    upper.x = lower.x;
+                    upper.y = lower.y - 50;
                     wasSeparating = true;
                     isCharging = false;
-                    chargePower = 0;
                 }
             }
             
-            if (isSeparated) {
-                if (upperBody.launched) {
-                    upperBody.vy += GRAVITY;
-                    upperBody.x += upperBody.vx;
-                    upperBody.y += upperBody.vy;
-                    
-                    // 飞行中果冻变形
-                    updateJelly(upperBody, GROUND_Y, upperBody.y >= GROUND_Y - 1);
-                    
-                    if (upperBody.y > GROUND_Y) {
-                        upperBody.y = GROUND_Y;
-                        upperBody.vy *= -0.3;
-                        upperBody.vx *= 0.8;
-                        upperBody.scaleX = 1.3;
-                        upperBody.scaleY = 0.7;
-                    }
-                    
-                    if (upperBody.x < 10) { upperBody.x = 10; upperBody.vx *= -0.5; }
-                    if (upperBody.x > 390) { upperBody.x = 390; upperBody.vx *= -0.5; }
-                } else {
-                    upperBody.x = jellyLower.x;
-                    upperBody.y = jellyLower.y - 20;
-                    upperBody.scaleX = jellyLower.scaleX;
-                    upperBody.scaleY = jellyLower.scaleY;
+            // 上半身飞行
+            if (isSeparated && upper.launched) {
+                upper.vy += GRAVITY;
+                upper.x += upper.vx;
+                upper.y += upper.vy;
+                
+                if (upper.y >= groundY) {
+                    upper.y = groundY;
+                    upper.vy *= -0.4;
+                    upper.vx *= 0.7;
                 }
+                if (upper.x < 20) { upper.x = 20; upper.vx *= -0.5; }
+                if (upper.x > 780) { upper.x = 780; upper.vx *= -0.5; }
+            } else if (isSeparated) {
+                upper.x = lower.x;
+                upper.y = lower.y - 50;
             }
             
             // 火球
@@ -450,115 +204,101 @@
                 const fb = fireballs[i];
                 fb.x += fb.vx;
                 fb.y += fb.vy;
-                fb.vy += 0.15;
+                fb.vy += 0.2;
                 fb.life--;
-                
-                if (fb.life <= 0 || fb.y > 250 || fb.x < 0 || fb.x > 400) {
+                if (fb.life <= 0 || fb.y > 500 || fb.x < 0 || fb.x > 800) {
                     fireballs.splice(i, 1);
                 }
             }
             
-            jellyLower.x = Math.max(15, Math.min(385, jellyLower.x));
+            // 边界
+            lower.x = Math.max(20, Math.min(780, lower.x));
         }
         
         function draw() {
-            // 深色背景
             ctx.fillStyle = '#1a1a2e';
-            ctx.fillRect(0, 0, 400, 250);
-            
-            // 背景星星
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-            for (let i = 0; i < 30; i++) {
-                const sx = (i * 73 + animFrame * 0.05) % 400;
-                const sy = (i * 47) % 160;
-                const twinkle = Math.sin(animFrame * 0.1 + i) * 0.5 + 0.5;
-                ctx.globalAlpha = twinkle * 0.5;
-                ctx.fillRect(Math.floor(sx), Math.floor(sy), 1, 1);
-            }
-            ctx.globalAlpha = 1;
+            ctx.fillRect(0, 0, 800, 500);
             
             // 地面
             ctx.fillStyle = '#3d3d5c';
-            ctx.fillRect(0, GROUND_Y, 400, 30);
+            ctx.fillRect(0, 450, 800, 50);
             
-            // 地面纹理
-            ctx.fillStyle = '#4a4a6a';
-            for (let gx = 0; gx < 400; gx += 16) {
-                ctx.fillRect(gx, GROUND_Y, 8, 2);
+            // 下半身
+            const bodyH = isCrouching ? lower.crouchHeight : 40;
+            ctx.fillStyle = '#e74c3c';
+            ctx.fillRect(lower.x - 15, lower.y - bodyH, 30, bodyH);
+            
+            // 腿
+            ctx.fillStyle = '#c0392b';
+            if (!isCrouching) {
+                ctx.fillRect(lower.x - 12, lower.y - 5, 6, 10);
+                ctx.fillRect(lower.x + 6, lower.y - 5, 6, 10);
+            } else {
+                ctx.fillRect(lower.x - 15, lower.y - 5, 8, 5);
+                ctx.fillRect(lower.x + 7, lower.y - 5, 8, 5);
             }
             
-            const isMoving = keys.a || keys.d;
+            // 上半身
+            ctx.fillStyle = '#f39c12';
+            ctx.beginPath();
+            ctx.arc(upper.x, upper.y, 15, 0, Math.PI * 2);
+            ctx.fill();
             
-            if (isSeparated) {
-                // 下半身（果冻身体）
-                drawJellyBody(jellyLower.x, jellyLower.y, jellyLower.scaleX, jellyLower.scaleY, '#e74c3c', '#c0392b', isCrouching);
-                drawJellyLegs(jellyLower.x, jellyLower.y, jellyLower.scaleX, isCrouching, isMoving);
-                
-                // 上半身（果冻头）
-                if (upperBody.launched) {
-                    drawJellyHead(upperBody.x, upperBody.y, upperBody.scaleX, upperBody.scaleY, '#f39c12', true);
-                }
-            } else {
-                // 合并状态
-                drawJellyBody(jellyLower.x, jellyLower.y, jellyLower.scaleX, jellyLower.scaleY, '#e74c3c', '#c0392b', isCrouching);
-                drawJellyLegs(jellyLower.x, jellyLower.y, jellyLower.scaleX, isCrouching, isMoving);
-                
-                const headY = isCrouching ? jellyLower.y - 8 : upperBody.y;
-                drawJellyHead(upperBody.x, headY, jellyLower.scaleX, jellyLower.scaleY, '#f39c12', false);
-                
-                // 蓄力圈
-                if (isCharging && holdFrames > 0) {
-                    const progress = Math.min(holdFrames / HOLD_THRESHOLD, 1);
-                    ctx.strokeStyle = `rgba(255, 255, 0, ${progress * 0.8})`;
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.arc(jellyLower.x, jellyLower.y - 20, 14 + progress * 8, 0, Math.PI * 2 * progress);
-                    ctx.stroke();
-                }
+            // 眼睛
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(upper.x - 5, upper.y - 3, 4, 0, Math.PI * 2);
+            ctx.arc(upper.x + 5, upper.y - 3, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.arc(upper.x - 4, upper.y - 2, 2, 0, Math.PI * 2);
+            ctx.arc(upper.x + 6, upper.y - 2, 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 蓄力圈
+            if (isCharging && holdFrames > 0) {
+                const progress = Math.min(holdFrames / HOLD_THRESHOLD, 1);
+                ctx.strokeStyle = `rgba(255, 255, 0, ${progress})`;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(upper.x, upper.y, 20 + progress * 10, 0, Math.PI * 2 * progress);
+                ctx.stroke();
             }
             
             // 瞄准线
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.setLineDash([5, 5]);
             ctx.beginPath();
-            ctx.moveTo(Math.floor(upperBody.x), Math.floor(upperBody.y));
-            const angle = Math.atan2(mouseY - upperBody.y, mouseX - upperBody.x);
-            ctx.lineTo(
-                Math.floor(upperBody.x + Math.cos(angle) * 60),
-                Math.floor(upperBody.y + Math.sin(angle) * 60)
-            );
+            ctx.moveTo(upper.x, upper.y);
+            const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
+            ctx.lineTo(upper.x + Math.cos(angle) * 80, upper.y + Math.sin(angle) * 80);
             ctx.stroke();
             ctx.setLineDash([]);
             
             // 火球
             for (const fb of fireballs) {
-                const alpha = fb.life / 80;
-                // 外焰
-                ctx.fillStyle = `rgba(255, 150, 0, ${alpha * 0.5})`;
+                ctx.fillStyle = `rgba(255, 150, 0, ${fb.life / 80})`;
                 ctx.beginPath();
-                ctx.arc(Math.floor(fb.x), Math.floor(fb.y), fb.radius + 2, 0, Math.PI * 2);
+                ctx.arc(fb.x, fb.y, fb.radius, 0, Math.PI * 2);
                 ctx.fill();
-                // 内焰
-                ctx.fillStyle = `rgba(255, 255, 100, ${alpha})`;
+                ctx.fillStyle = `rgba(255, 255, 0, ${fb.life / 80})`;
                 ctx.beginPath();
-                ctx.arc(Math.floor(fb.x), Math.floor(fb.y), fb.radius, 0, Math.PI * 2);
+                ctx.arc(fb.x, fb.y, fb.radius - 2, 0, Math.PI * 2);
                 ctx.fill();
             }
             
             // UI
             ctx.fillStyle = '#fff';
-            ctx.font = '8px monospace';
-            ctx.fillText('小小跳跃', 4, 10);
-            
+            ctx.font = '14px Arial';
             if (isSeparated) {
-                ctx.fillText('分离模式 | 空格融合', 4, 240);
+                ctx.fillText('分离模式 | 空格=下身跳跃/发射 | 靠近后空格融合', 10, 20);
             } else if (isCrouching) {
-                ctx.fillText('压扁中...', 4, 240);
+                ctx.fillText('压扁中', 10, 20);
             } else if (isCharging) {
-                const p = Math.round(Math.min(holdFrames / HOLD_THRESHOLD * 100, 100));
-                ctx.fillText(`蓄力 ${p}%`, 4, 240);
+                ctx.fillText(`蓄力中: ${Math.round(holdFrames / HOLD_THRESHOLD * 100)}%`, 10, 20);
             } else {
-                ctx.fillText('空格跳跃/分离', 4, 240);
+                ctx.fillText('短按空格=跳跃 | 长按空格=分离+发射', 10, 20);
             }
         }
         
