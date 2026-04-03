@@ -247,14 +247,19 @@
             }
             if (e.code === 'Space') {
                 if (keys.space) {
+                    console.log(`KeyUp: isSeparated=${isSeparated}, launched=${upperBody.launched}, holdFrames=${holdFrames}, onGround=${lowerBody.onGround}`);
+                    
                     if (wasSeparating && isSeparated) {
+                        console.log("发射上半身");
                         launchUpperBody();
                     } else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lowerBody.onGround) {
                         // 合并状态短按 = 跳跃
+                        console.log("合并状态跳跃");
                         lowerBody.vy = -JUMP_POWER;
                         lowerBody.onGround = false;
-                    } else if (isSeparated && !upperBody.launched && holdFrames < HOLD_THRESHOLD && lowerBody.onGround) {
-                        // 分离状态短按 = 下身跳跃
+                    } else if (isSeparated && lowerBody.onGround) {
+                        // 分离状态短按 = 下身跳跃（简化条件）
+                        console.log("分离状态跳跃");
                         lowerBody.vy = -JUMP_POWER;
                         lowerBody.onGround = false;
                     }
