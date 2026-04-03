@@ -23,11 +23,12 @@
         
         // 物理常量
         const GRAVITY = 0.55;
-        const MAX_POWER = 15;
-        const POWER_RATE = 0.3;
+        const MAX_POWER = 25;        // 最大发射力度
+        const POWER_RATE = 0.4;      // 蓄力速度
         const JUMP_POWER_SMALL = 9;
         const JUMP_POWER_BIG = 14;
-        const HOLD_FOR_BIG_JUMP = 10; // 按多少帧算大跳
+        const HOLD_FOR_SEPARATION = 15; // 多少帧后分离（变长）
+        const MAX_CHARGE_FRAMES = 60;   // 最大蓄力帧数（1秒）
         const MOVE_SPEED = 5;
         
         // 土狼时间 & 跳跃缓冲
@@ -297,13 +298,19 @@
                 holdFramesW++;
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
-                if (holdFramesW >= HOLD_FOR_BIG_JUMP) {
+                // 达到分离阈值
+                if (holdFramesW >= HOLD_FOR_SEPARATION && !isSeparated) {
                     isSeparated = true;
                     upper.launched = false;
                     upper.x = lower.x;
                     upper.y = lower.y - 50;
                     wasSeparating = true;
-                    isChargingW = false;
+                    // 继续蓄力，不停止
+                }
+                
+                // 限制最大蓄力
+                if (holdFramesW > MAX_CHARGE_FRAMES) {
+                    holdFramesW = MAX_CHARGE_FRAMES;
                 }
             }
             
@@ -406,14 +413,26 @@
             ctx.arc(upper.x + 6, upper.y - 2, 2, 0, Math.PI * 2);
             ctx.fill();
             
-            // W蓄力圈
+            // W蓄力圈（显示力度）
             if (isChargingW && holdFramesW > 0) {
-                const progress = Math.min(holdFramesW / HOLD_FOR_BIG_JUMP, 1);
-                ctx.strokeStyle = `rgba(0, 255, 255, ${progress})`;
-                ctx.lineWidth = 3;
+                const powerProgress = Math.min(holdFramesW / MAX_CHARGE_FRAMES, 1);
+                const sepProgress = Math.min(holdFramesW / HOLD_FOR_SEPARATION, 1);
+                
+                // 外圈：力度（蓝色）
+                ctx.strokeStyle = `rgba(0, 200, 255, ${0.3 + powerProgress * 0.7})`;
+                ctx.lineWidth = 4;
                 ctx.beginPath();
-                ctx.arc(upper.x, upper.y, 20 + progress * 10, 0, Math.PI * 2 * progress);
+                ctx.arc(upper.x, upper.y, 25 + powerProgress * 15, 0, Math.PI * 2 * powerProgress);
                 ctx.stroke();
+                
+                // 内圈：分离进度（黄色）
+                if (!isSeparated) {
+                    ctx.strokeStyle = `rgba(255, 200, 0, ${sepProgress})`;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(upper.x, upper.y, 20, 0, Math.PI * 2 * sepProgress);
+                    ctx.stroke();
+                }
             }
             
             // 瞄准线
@@ -454,8 +473,13 @@
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
                 } else if (isChargingW) {
-                    const p = Math.round(Math.min(holdFramesW / HOLD_FOR_BIG_JUMP * 100, 100));
-                    ctx.fillText(`W蓄力分离: ${p}%`, 10, 480);
+                    const separationP = Math.round(Math.min(holdFramesW / HOLD_FOR_SEPARATION * 100, 100));
+                    const powerP = Math.round(Math.min(holdFramesW / MAX_CHARGE_FRAMES * 100, 100));
+                    if (!isSeparated) {
+                        ctx.fillText(`W蓄力: 分离${separationP}% | 力度${powerP}%`, 10, 480);
+                    } else {
+                        ctx.fillText(`W蓄力力度: ${powerP}% (松开发射)`, 10, 480);
+                    }
                 } else {
                     ctx.fillText('空格=跳跃 | W长按=分离 | 靠近W融合', 10, 480);
                 }
