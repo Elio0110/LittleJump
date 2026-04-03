@@ -1,4 +1,4 @@
-# 半身分离游戏 Demo
+# 小小跳跃 (Little Jump)
 
 一个基于 HTML5 Canvas 的 2D 像素风游戏原型。
 
@@ -6,6 +6,7 @@
 
 - **下半身（红色）**：负责移动（A/D键）
 - **上半身/头（黄色）**：负责瞄准和发射火球
+- **核心玩法**：通过分离上半身来解决谜题和闯关
 
 ## 操作说明
 
@@ -19,7 +20,7 @@
 
 ## 在线试玩
 
-https://[你的github用户名].github.io/game-demo-repo/
+🔗 https://elio0110.github.io/LittleJump/
 
 ## 本地运行
 
@@ -30,3 +31,7 @@ https://[你的github用户名].github.io/game-demo-repo/
 - HTML5 Canvas
 - Vanilla JavaScript
 - 无外部依赖
+
+---
+
+*Made with ❤️ by 小小杯月*
