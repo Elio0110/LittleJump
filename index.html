@@ -6,14 +6,7 @@
     <title>小小跳跃 | Little Jump</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            background: #1a1a2e; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            min-height: 100vh;
-            flex-direction: column;
-        }
+        body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; min-height: 100vh; flex-direction: column; }
         canvas { background: #2d2d44; border: 2px solid #444; cursor: crosshair; }
         #info { color: #888; font-size: 14px; margin-top: 10px; text-align: center; }
         #controls { color: #aaa; font-size: 12px; margin-top: 5px; }
@@ -21,37 +14,46 @@
 </head>
 <body>
     <canvas id="game" width="800" height="500"></canvas>
-    <div id="info">短按空格跳跃 | 长按空格分离+发射上半身 | 分离后短按空格融合</div>
-    <div id="controls">A/D移动 | S压扁 | 鼠标瞄准 | 左键发射火球</div>
+    <div id="info">短按空格跳跃 | 长按空格分离+发射 | 分离后短按空格融合 | 到达终点 ⭐ 获胜！</div>
+    <div id="controls">A/D移动 | S压扁 | 鼠标瞄准 | 左键发射</div>
     
     <script>
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         
-        const GRAVITY = 0.5;
+        // 物理常量
+        const GRAVITY = 0.6;
         const MAX_POWER = 15;
         const POWER_RATE = 0.3;
-        const JUMP_POWER = 12;
-        const HOLD_THRESHOLD = 15;
+        const JUMP_POWER = 13;
+        const HOLD_THRESHOLD = 12;
+        const MOVE_SPEED = 5;
         
+        // 土狼时间 & 跳跃缓冲
+        const COYOTE_TIME = 8;   // 离开平台后几帧内还能跳
+        const JUMP_BUFFER = 8;   // 落地前几帧按空格还能跳
+        
+        // 游戏状态
         let isSeparated = false;
         let isCharging = false;
         let chargePower = 0;
         let holdFrames = 0;
         let wasSeparating = false;
         let isCrouching = false;
+        let coyoteTimer = 0;     // 土狼时间计时器
+        let jumpBufferTimer = 0; // 跳跃缓冲计时器
+        let gameWon = false;
         
-        // 下半身
+        // 角色
         const lower = {
-            x: 400, y: 350,
+            x: 60, y: 400,
             vy: 0,
             onGround: false,
             crouchHeight: 20
         };
         
-        // 上半身
         const upper = {
-            x: 400, y: 300,
+            x: 60, y: 350,
             vx: 0, vy: 0,
             launched: false
         };
@@ -60,10 +62,110 @@
         let mouseX = 400, mouseY = 250;
         const keys = { a: false, d: false, s: false, space: false };
         
+        // 关卡设计
+        const platforms = [
+            // 地面
+            { x: 0, y: 460, w: 800, h: 40 },
+            // 起始平台
+            { x: 20, y: 400, w: 100, h: 20 },
+            // 第一个跳台
+            { x: 180, y: 360, w: 80, h: 20 },
+            // 第二个跳台（需要跳上去）
+            { x: 320, y: 300, w: 100, h: 20 },
+            // 高处平台
+            { x: 480, y: 240, w: 120, h: 20 },
+            // 窄缝通道（需要压扁）
+            { x: 480, y: 280, w: 120, h: 10, isBarrier: true },
+            // 最终平台（终点）
+            { x: 650, y: 180, w: 130, h: 20 },
+            // 左侧上升路线
+            { x: 50, y: 300, w: 80, h: 20 },
+            { x: 150, y: 230, w: 80, h: 20 },
+            // 中间平台
+            { x: 280, y: 180, w: 100, h: 20 },
+        ];
+        
+        // 终点旗子
+        const goal = { x: 700, y: 130, w: 30, h: 50 };
+        
+        // 颜色
+        const COLORS = {
+            bg: '#1a1a2e',
+            platform: '#4a4a6a',
+            barrier: '#8b4513',
+            player: '#e74c3c',
+            head: '#f39c12',
+            goal: '#ffd700'
+        };
+        
+        // ===== 跳跃缓冲 =====
+        function tryJump() {
+            // 合并状态或分离状态的下半身都能跳
+            if (lower.onGround || coyoteTimer > 0) {
+                lower.vy = -JUMP_POWER;
+                lower.onGround = false;
+                coyoteTimer = 0;
+                jumpBufferTimer = 0;
+                return true;
+            }
+            return false;
+        }
+        
+        // ===== 碰撞检测 =====
+        function checkPlatformCollision() {
+            let wasOnGround = lower.onGround;
+            lower.onGround = false;
+            
+            for (const p of platforms) {
+                // 只检测从上方落下时的碰撞
+                if (lower.vy >= 0) {
+                    const prevBottom = lower.y - lower.vy;
+                    const currBottom = lower.y;
+                    
+                    // 身体左侧在平台范围内
+                    if (lower.x > p.x && lower.x < p.x + p.w) {
+                        // 上一帧在平台上方的角色，这一帧穿过平台
+                        if (prevBottom <= p.y && currBottom >= p.y) {
+                            lower.y = p.y;
+                            lower.vy = 0;
+                            lower.onGround = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // 土狼时间：刚离开平台时
+            if (wasOnGround && !lower.onGround && lower.vy >= 0) {
+                coyoteTimer = COYOTE_TIME;
+            }
+        }
+        
+        function checkGoal() {
+            // 到达终点检测
+            if (lower.x > goal.x && lower.x < goal.x + goal.w &&
+                lower.y > goal.y && lower.y < goal.y + goal.h) {
+                gameWon = true;
+            }
+        }
+        
+        function resetGame() {
+            lower.x = 60;
+            lower.y = 400;
+            lower.vy = 0;
+            upper.x = 60;
+            upper.y = 350;
+            upper.launched = false;
+            isSeparated = false;
+            gameWon = false;
+        }
+        
+        // ===== 输入处理 =====
         document.addEventListener('keydown', (e) => {
             if (e.code === 'KeyA') keys.a = true;
             if (e.code === 'KeyD') keys.d = true;
             if (e.code === 'KeyS') { keys.s = true; isCrouching = true; }
+            if (e.code === 'KeyR' && gameWon) { resetGame(); }
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (!keys.space) {
@@ -71,14 +173,13 @@
                     holdFrames = 0;
                     isCharging = true;
                     wasSeparating = false;
+                    jumpBufferTimer = JUMP_BUFFER; // 跳跃缓冲
                     
-                    // 分离状态下先检查是否能融合
+                    // 分离状态检查融合
                     if (isSeparated) {
                         const dx = lower.x - upper.x;
                         const dy = lower.y - upper.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        if (dist < 50) {
-                            // 靠近就融合
+                        if (Math.sqrt(dx*dx + dy*dy) < 50) {
                             isSeparated = false;
                             upper.launched = false;
                             upper.x = lower.x;
@@ -104,15 +205,12 @@
                         upper.vy = Math.sin(angle) * power;
                         upper.launched = true;
                     }
-                    // 合并状态短按 = 跳跃
-                    else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lower.onGround) {
-                        lower.vy = -JUMP_POWER;
-                        lower.onGround = false;
-                    }
-                    // 分离状态短按 = 下身跳跃（没融合的情况）
-                    else if (isSeparated && holdFrames < HOLD_THRESHOLD && lower.onGround) {
-                        lower.vy = -JUMP_POWER;
-                        lower.onGround = false;
+                    // 短按 = 尝试跳跃（带缓冲）
+                    else if (holdFrames < HOLD_THRESHOLD) {
+                        if (!tryJump()) {
+                            // 跳不了就缓冲
+                            jumpBufferTimer = JUMP_BUFFER;
+                        }
                     }
                     
                     keys.space = false;
@@ -144,34 +242,31 @@
             });
         }
         
-        function tryMerge() {
-            const dx = lower.x - upper.x;
-            const dy = lower.y - upper.y;
-            if (Math.sqrt(dx*dx + dy*dy) < 50) {
-                isSeparated = false;
-                upper.launched = false;
-                upper.x = lower.x;
-                upper.y = lower.y - 40;
-            }
-        }
-        
+        // ===== 更新 =====
         function update() {
+            if (gameWon) return;
+            
             // 移动
-            if (keys.a) lower.x -= 5;
-            if (keys.d) lower.x += 5;
+            if (keys.a) lower.x -= MOVE_SPEED;
+            if (keys.d) lower.x += MOVE_SPEED;
+            
+            // 跳跃缓冲递减
+            if (jumpBufferTimer > 0) {
+                jumpBufferTimer--;
+                if (tryJump()) {
+                    // 跳跃成功
+                }
+            }
+            
+            // 土狼时间递减
+            if (coyoteTimer > 0) coyoteTimer--;
             
             // 重力
             lower.vy += GRAVITY;
             lower.y += lower.vy;
             
-            const groundY = 450;
-            if (lower.y >= groundY) {
-                lower.y = groundY;
-                lower.vy = 0;
-                lower.onGround = true;
-            } else {
-                lower.onGround = false;
-            }
+            // 碰撞检测
+            checkPlatformCollision();
             
             // 头的位置
             if (!isSeparated) {
@@ -185,7 +280,6 @@
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
                 if (holdFrames >= HOLD_THRESHOLD) {
-                    // 达到阈值，分离
                     isSeparated = true;
                     upper.launched = false;
                     upper.x = lower.x;
@@ -201,13 +295,20 @@
                 upper.x += upper.vx;
                 upper.y += upper.vy;
                 
-                if (upper.y >= groundY) {
-                    upper.y = groundY;
-                    upper.vy *= -0.4;
-                    upper.vx *= 0.7;
+                // 和地面碰撞
+                for (const p of platforms) {
+                    if (upper.y + 15 > p.y && upper.y < p.y + p.h &&
+                        upper.x > p.x && upper.x < p.x + p.w) {
+                        upper.y = p.y - 15;
+                        upper.vy *= -0.3;
+                        upper.vx *= 0.8;
+                        break;
+                    }
                 }
-                if (upper.x < 20) { upper.x = 20; upper.vx *= -0.5; }
-                if (upper.x > 780) { upper.x = 780; upper.vx *= -0.5; }
+                
+                // 边界
+                if (upper.x < 15) { upper.x = 15; upper.vx *= -0.5; }
+                if (upper.x > 785) { upper.x = 785; upper.vx *= -0.5; }
             } else if (isSeparated) {
                 upper.x = lower.x;
                 upper.y = lower.y - 50;
@@ -218,7 +319,7 @@
                 const fb = fireballs[i];
                 fb.x += fb.vx;
                 fb.y += fb.vy;
-                fb.vy += 0.2;
+                fb.vy += 0.15;
                 fb.life--;
                 if (fb.life <= 0 || fb.y > 500 || fb.x < 0 || fb.x > 800) {
                     fireballs.splice(i, 1);
@@ -226,20 +327,46 @@
             }
             
             // 边界
-            lower.x = Math.max(20, Math.min(780, lower.x));
+            lower.x = Math.max(15, Math.min(785, lower.x));
+            
+            // 终点检测
+            checkGoal();
         }
         
+        // ===== 绘制 =====
         function draw() {
-            ctx.fillStyle = '#1a1a2e';
+            // 背景
+            ctx.fillStyle = COLORS.bg;
             ctx.fillRect(0, 0, 800, 500);
             
-            // 地面
-            ctx.fillStyle = '#3d3d5c';
-            ctx.fillRect(0, 450, 800, 50);
+            // 背景星星
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            for (let i = 0; i < 30; i++) {
+                ctx.fillRect((i * 97) % 800, (i * 53) % 300, 2, 2);
+            }
             
-            // 下半身
+            // 平台
+            for (const p of platforms) {
+                ctx.fillStyle = p.isBarrier ? COLORS.barrier : COLORS.platform;
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                // 平台高光
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                ctx.fillRect(p.x, p.y, p.w, 3);
+            }
+            
+            // 终点旗子
+            ctx.fillStyle = COLORS.goal;
+            ctx.fillRect(goal.x, goal.y, 4, goal.h); // 旗杆
+            ctx.beginPath();
+            ctx.moveTo(goal.x + 4, goal.y);
+            ctx.lineTo(goal.x + 30, goal.y + 15);
+            ctx.lineTo(goal.x + 4, goal.y + 30);
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fill();
+            
+            // 玩家 - 下半身
             const bodyH = isCrouching ? lower.crouchHeight : 40;
-            ctx.fillStyle = '#e74c3c';
+            ctx.fillStyle = COLORS.player;
             ctx.fillRect(lower.x - 15, lower.y - bodyH, 30, bodyH);
             
             // 腿
@@ -252,8 +379,8 @@
                 ctx.fillRect(lower.x + 7, lower.y - 5, 8, 5);
             }
             
-            // 上半身
-            ctx.fillStyle = '#f39c12';
+            // 玩家 - 上半身
+            ctx.fillStyle = COLORS.head;
             ctx.beginPath();
             ctx.arc(upper.x, upper.y, 15, 0, Math.PI * 2);
             ctx.fill();
@@ -281,7 +408,7 @@
             }
             
             // 瞄准线
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
             ctx.moveTo(upper.x, upper.y);
@@ -292,11 +419,12 @@
             
             // 火球
             for (const fb of fireballs) {
-                ctx.fillStyle = `rgba(255, 150, 0, ${fb.life / 80})`;
+                const alpha = fb.life / 80;
+                ctx.fillStyle = `rgba(255, 150, 0, ${alpha})`;
                 ctx.beginPath();
                 ctx.arc(fb.x, fb.y, fb.radius, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.fillStyle = `rgba(255, 255, 0, ${fb.life / 80})`;
+                ctx.fillStyle = `rgba(255, 255, 0, ${alpha})`;
                 ctx.beginPath();
                 ctx.arc(fb.x, fb.y, fb.radius - 2, 0, Math.PI * 2);
                 ctx.fill();
@@ -305,14 +433,28 @@
             // UI
             ctx.fillStyle = '#fff';
             ctx.font = '14px Arial';
-            if (isSeparated) {
-                ctx.fillText('分离模式 | 空格=下身跳跃/发射 | 靠近后空格融合', 10, 20);
-            } else if (isCrouching) {
-                ctx.fillText('压扁中', 10, 20);
-            } else if (isCharging) {
-                ctx.fillText(`蓄力中: ${Math.round(holdFrames / HOLD_THRESHOLD * 100)}%`, 10, 20);
+            
+            if (gameWon) {
+                ctx.fillStyle = '#ffd700';
+                ctx.font = '32px Arial';
+                ctx.fillText('🎉 到达终点！按 R 重新开始 🎉', 200, 250);
             } else {
-                ctx.fillText('短按空格=跳跃 | 长按空格=分离+发射', 10, 20);
+                ctx.fillText('小小跳跃', 10, 20);
+                if (isSeparated) {
+                    ctx.fillText('分离模式 | 空格=下身跳跃/发射 | 靠近后空格融合', 10, 480);
+                } else if (isCrouching) {
+                    ctx.fillText('压扁中...', 10, 480);
+                } else if (isCharging) {
+                    ctx.fillText(`蓄力: ${Math.round(holdFrames / HOLD_THRESHOLD * 100)}%`, 10, 480);
+                } else {
+                    ctx.fillText('短按空格=跳跃 | 长按空格=分离', 10, 480);
+                }
+                
+                // 土狼时间指示（调试用）
+                if (coyoteTimer > 0) {
+                    ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+                    ctx.fillText('土狼时间!', lower.x - 20, lower.y - 60);
+                }
             }
         }
         
