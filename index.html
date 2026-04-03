@@ -334,11 +334,6 @@
                 holdFramesW++;
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
-                // 不按S时，上半身慢慢回到默认位置
-                if (!keys.s && chargeUpperOffset > -50) {
-                    chargeUpperOffset -= 1;
-                }
-                
                 // 达到分离阈值
                 if (holdFramesW >= HOLD_FOR_SEPARATION && !isSeparated) {
                     isSeparated = true;
@@ -453,48 +448,62 @@
             ctx.arc(upper.x + 6, upper.y - 2, 2, 0, Math.PI * 2);
             ctx.fill();
             
-            // W蓄力圈（合并显示）
+            // 右键蓄力圈（完整360°）
             if (isChargingW && holdFramesW > 0) {
                 const progress = Math.min(holdFramesW / MAX_CHARGE_FRAMES, 1);
-                const sepRatio = HOLD_FOR_SEPARATION / MAX_CHARGE_FRAMES; // 分离点位置
+                const sepRatio = HOLD_FOR_SEPARATION / MAX_CHARGE_FRAMES;
                 
-                // 背景圈
+                // 背景圈（完整）
                 ctx.strokeStyle = 'rgba(100, 100, 100, 0.3)';
-                ctx.lineWidth = 6;
+                ctx.lineWidth = 8;
                 ctx.beginPath();
-                ctx.arc(upper.x, upper.y, 30, 0, Math.PI * 2);
+                ctx.arc(upper.x, upper.y, 35, 0, Math.PI * 2);
                 ctx.stroke();
                 
-                // 蓄力进度圈
+                // 蓄力进度圈（从顶部开始，顺时针）
+                const startAngle = -Math.PI / 2;
+                const endAngle = startAngle + Math.PI * 2 * progress;
+                
                 if (progress < sepRatio) {
-                    // 分离前：黄色（蓄力中）
-                    ctx.strokeStyle = `rgba(255, 200, 0, ${0.5 + progress/sepRatio * 0.5})`;
+                    // 分离前：黄色渐变
+                    const alpha = 0.5 + (progress / sepRatio) * 0.5;
+                    ctx.strokeStyle = `rgba(255, 220, 0, ${alpha})`;
                 } else {
-                    // 分离后：青色到红色（力度增加）
+                    // 分离后：绿色到红色
                     const powerProgress = (progress - sepRatio) / (1 - sepRatio);
-                    const r = Math.floor(0 + powerProgress * 255);
-                    const g = Math.floor(200 - powerProgress * 100);
-                    const b = Math.floor(255 - powerProgress * 100);
-                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+                    const r = Math.floor(50 + powerProgress * 205);
+                    const g = Math.floor(255 - powerProgress * 150);
+                    const b = 50;
+                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 1)`;
                 }
                 
-                ctx.lineWidth = 6;
+                ctx.lineWidth = 8;
                 ctx.beginPath();
-                ctx.arc(upper.x, upper.y, 30, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * progress);
+                ctx.arc(upper.x, upper.y, 35, startAngle, endAngle, false);
                 ctx.stroke();
                 
-                // 分离点标记
+                // 分离点标记（白点）
                 if (!isSeparated) {
-                    const sepAngle = -Math.PI/2 + Math.PI * 2 * sepRatio;
+                    const sepAngle = startAngle + Math.PI * 2 * sepRatio;
                     ctx.fillStyle = '#fff';
                     ctx.beginPath();
                     ctx.arc(
-                        upper.x + Math.cos(sepAngle) * 30,
-                        upper.y + Math.sin(sepAngle) * 30,
-                        3, 0, Math.PI * 2
+                        upper.x + Math.cos(sepAngle) * 35,
+                        upper.y + Math.sin(sepAngle) * 35,
+                        4, 0, Math.PI * 2
                     );
                     ctx.fill();
                 }
+                
+                // 当前进度标记（亮点）
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(
+                    upper.x + Math.cos(endAngle) * 35,
+                    upper.y + Math.sin(endAngle) * 35,
+                    3, 0, Math.PI * 2
+                );
+                ctx.fill();
             }
             
             // 瞄准线
