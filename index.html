@@ -340,10 +340,11 @@
                 lowerBody.onGround = false;
             }
             
-            // 头的位置
+            // 头的位置（压扁时头也降低）
             if (!isSeparated) {
                 upperBody.x = lowerBody.x;
-                upperBody.y = lowerBody.y - 20;
+                const headOffset = isCrouching ? 10 : 20; // 压扁时头更低
+                upperBody.y = lowerBody.y - headOffset;
             }
             
             // 蓄力检测
@@ -433,7 +434,9 @@
             } else {
                 // 合并状态
                 drawCharacterPixel(lowerBody.x, lowerBody.y, true, isCrouching, animFrame);
-                drawCharacterPixel(upperBody.x, upperBody.y, false, false, animFrame);
+                // 头位置根据压扁状态调整
+                const headY = isCrouching ? lowerBody.y - 10 : upperBody.y;
+                drawCharacterPixel(upperBody.x, headY, false, isCrouching, animFrame);
                 
                 // 蓄力圈
                 if (isCharging && holdFrames > 0) {
