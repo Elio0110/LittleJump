@@ -14,8 +14,8 @@
 </head>
 <body>
     <canvas id="game" width="800" height="500"></canvas>
-    <div id="info">空格=跳跃 | W=分离/融合/发射 | 蓄力时S调整发射高度 | 到达终点 ⭐ 获胜！</div>
-    <div id="controls">A/D移动 | S压扁/调整高度 | 空格跳跃 | W长按蓄力，靠近融合，松开发射</div>
+    <div id="info">空格=跳跃 | 右键=分离/融合/发射 | 蓄力时S调整发射高度 | 到达终点 ⭐ 获胜！</div>
+    <div id="controls">A/D移动 | S压扁/调整高度 | 空格跳跃 | 右键长按蓄力，靠近右键融合，松开发射</div>
     
     <script>
         const canvas = document.getElementById('game');
@@ -182,37 +182,9 @@
                 }
             }
             
-            // W = 分离/融合
+            // W键（备用）
             if (e.code === 'KeyW') {
-                e.preventDefault();
-                if (!keys.w) {
-                    keys.w = true;
-                    
-                    // 分离状态下检查融合
-                    if (isSeparated) {
-                        const dx = lower.x - upper.x;
-                        const dy = lower.y - upper.y;
-                        if (Math.sqrt(dx*dx + dy*dy) < 50) {
-                            // 靠近就融合
-                            isSeparated = false;
-                            upper.launched = false;
-                            upper.x = lower.x;
-                            upper.y = lower.y - 50;
-                            isChargingW = false;
-                        } else {
-                            // 远离就准备发射（如果还没发射）
-                            if (!upper.launched) {
-                                isChargingW = true;
-                                holdFramesW = 0;
-                            }
-                        }
-                    } else {
-                        // 合并状态开始蓄力分离
-                        isChargingW = true;
-                        holdFramesW = 0;
-                        wasSeparating = false;
-                    }
-                }
+                keys.w = true;
             }
         });
         
@@ -235,23 +207,9 @@
                 }
             }
             
-            // W松开 = 发射（如果处于分离且蓄力状态）
+            // W松开
             if (e.code === 'KeyW') {
-                if (keys.w) {
-                    if (wasSeparating && isSeparated && !upper.launched) {
-                        const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
-                        const power = Math.min(chargePower, MAX_POWER);
-                        upper.vx = Math.cos(angle) * power;
-                        upper.vy = Math.sin(angle) * power;
-                        upper.launched = true;
-                    }
-                    keys.w = false;
-                    isChargingW = false;
-                    chargePower = 0;
-                    holdFramesW = 0;
-                    wasSeparating = false;
-                    chargeUpperOffset = -50; // 重置位置
-                }
+                keys.w = false;
             }
         });
         
@@ -261,9 +219,61 @@
             mouseY = e.clientY - rect.top;
         });
         
+        // 左键 = 发射火球
         canvas.addEventListener('mousedown', (e) => {
             if (e.button === 0) shootFireball();
         });
+        
+        // 右键 = 分离/融合/蓄力
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 2) {
+                e.preventDefault();
+                
+                // 分离状态下检查融合
+                if (isSeparated) {
+                    const dx = lower.x - upper.x;
+                    const dy = lower.y - upper.y;
+                    if (Math.sqrt(dx*dx + dy*dy) < 50) {
+                        // 靠近就融合
+                        isSeparated = false;
+                        upper.launched = false;
+                        upper.x = lower.x;
+                        upper.y = lower.y - 50;
+                        isChargingW = false;
+                    } else if (!upper.launched) {
+                        // 远离就准备发射
+                        isChargingW = true;
+                        holdFramesW = 0;
+                    }
+                } else {
+                    // 合并状态开始蓄力分离
+                    isChargingW = true;
+                    holdFramesW = 0;
+                    wasSeparating = false;
+                }
+            }
+        });
+        
+        // 右键松开 = 发射
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 2) {
+                if (wasSeparating && isSeparated && !upper.launched) {
+                    const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
+                    const power = Math.min(chargePower, MAX_POWER);
+                    upper.vx = Math.cos(angle) * power;
+                    upper.vy = Math.sin(angle) * power;
+                    upper.launched = true;
+                }
+                isChargingW = false;
+                chargePower = 0;
+                holdFramesW = 0;
+                wasSeparating = false;
+                chargeUpperOffset = -50;
+            }
+        });
+        
+        // 禁用右键菜单
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
         
         function shootFireball() {
             const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
@@ -513,7 +523,7 @@
             } else {
                 ctx.fillText('小小跳跃', 10, 20);
                 if (isSeparated) {
-                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近W融合 | 长按W蓄力，松开发射', 10, 480);
+                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近右键融合 | 长按右键蓄力，松开发射', 10, 480);
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
                 } else if (isChargingW) {
@@ -522,12 +532,12 @@
                     const percent = Math.round(progress * 100);
                     const heightPercent = Math.round((chargeUpperOffset + 80) / 60 * 100);
                     if (!isSeparated) {
-                        ctx.fillText(`W蓄力: ${seconds}s / 3.0s (${percent}%) | S调整高度(${heightPercent}%)`, 10, 480);
+                        ctx.fillText(`右键蓄力: ${seconds}s / 3.0s (${percent}%) | S调整高度(${heightPercent}%)`, 10, 480);
                     } else {
-                        ctx.fillText(`已分离！蓄力: ${seconds}s / 3.0s (${percent}%) 松开发射`, 10, 480);
+                        ctx.fillText(`已分离！右键蓄力: ${seconds}s / 3.0s (${percent}%) 松开发射`, 10, 480);
                     }
                 } else {
-                    ctx.fillText('空格=跳跃 | W长按=分离 | 靠近W融合', 10, 480);
+                    ctx.fillText('空格=跳跃 | 右键长按=分离 | 靠近右键融合', 10, 480);
                 }
                 
                 if (coyoteTimer > 0) {
