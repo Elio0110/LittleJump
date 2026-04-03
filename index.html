@@ -27,7 +27,7 @@
         const POWER_RATE = 0.3;      // 蓄力速度
         const JUMP_POWER_SMALL = 9;
         const JUMP_POWER_BIG = 14;
-        const HOLD_FOR_SEPARATION = 30; // 0.5秒后分离
+        const HOLD_FOR_SEPARATION = 60; // 1秒后分离
         const MAX_CHARGE_FRAMES = 180;  // 3秒最大蓄力
         const MOVE_SPEED = 5;
         
@@ -317,15 +317,12 @@
             // 头的位置（蓄力时可调整，压扁时跟随）
             if (!isSeparated) {
                 upper.x = lower.x;
-                if (isChargingW) {
-                    // 蓄力时使用可调整的位置（压扁时也保持）
-                    let baseOffset = isCrouching ? -25 : -50;
-                    upper.y = lower.y + baseOffset + (chargeUpperOffset + 50);
-                } else if (isCrouching) {
-                    // 压扁时头降低
+                
+                if (isCrouching) {
+                    // 压扁时：头在身体上方25像素
                     upper.y = lower.y - 25;
                 } else {
-                    // 正常站立
+                    // 站立时：头在身体上方50像素
                     upper.y = lower.y - 50;
                 }
             }
