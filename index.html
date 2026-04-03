@@ -14,34 +14,35 @@
 </head>
 <body>
     <canvas id="game" width="800" height="500"></canvas>
-    <div id="info">短按空格跳跃 | 长按空格分离+发射 | 分离后短按空格融合 | 到达终点 ⭐ 获胜！</div>
-    <div id="controls">A/D移动 | S压扁 | 鼠标瞄准 | 左键发射</div>
+    <div id="info">空格跳跃（长短按控制高度）| W长按分离+发射 | 到达终点 ⭐ 获胜！</div>
+    <div id="controls">A/D移动 | S压扁 | 空格跳跃 | W分离 | 左键发射</div>
     
     <script>
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         
         // 物理常量
-        const GRAVITY = 0.6;
+        const GRAVITY = 0.55;
         const MAX_POWER = 15;
         const POWER_RATE = 0.3;
-        const JUMP_POWER = 13;
-        const HOLD_THRESHOLD = 12;
+        const JUMP_POWER_SMALL = 9;
+        const JUMP_POWER_BIG = 14;
+        const HOLD_FOR_BIG_JUMP = 10; // 按多少帧算大跳
         const MOVE_SPEED = 5;
         
         // 土狼时间 & 跳跃缓冲
-        const COYOTE_TIME = 8;   // 离开平台后几帧内还能跳
-        const JUMP_BUFFER = 8;   // 落地前几帧按空格还能跳
+        const COYOTE_TIME = 8;
+        const JUMP_BUFFER = 8;
         
         // 游戏状态
         let isSeparated = false;
-        let isCharging = false;
+        let isChargingW = false;
         let chargePower = 0;
-        let holdFrames = 0;
+        let holdFramesW = 0;
         let wasSeparating = false;
         let isCrouching = false;
-        let coyoteTimer = 0;     // 土狼时间计时器
-        let jumpBufferTimer = 0; // 跳跃缓冲计时器
+        let coyoteTimer = 0;
+        let jumpBufferTimer = 0;
         let gameWon = false;
         
         // 角色
@@ -49,7 +50,8 @@
             x: 60, y: 400,
             vy: 0,
             onGround: false,
-            crouchHeight: 20
+            crouchHeight: 20,
+            isJumping: false
         };
         
         const upper = {
@@ -60,35 +62,24 @@
         
         const fireballs = [];
         let mouseX = 400, mouseY = 250;
-        const keys = { a: false, d: false, s: false, space: false };
+        const keys = { a: false, d: false, s: false, space: false, w: false };
         
         // 关卡设计
         const platforms = [
-            // 地面
             { x: 0, y: 460, w: 800, h: 40 },
-            // 起始平台
             { x: 20, y: 400, w: 100, h: 20 },
-            // 第一个跳台
             { x: 180, y: 360, w: 80, h: 20 },
-            // 第二个跳台（需要跳上去）
             { x: 320, y: 300, w: 100, h: 20 },
-            // 高处平台
             { x: 480, y: 240, w: 120, h: 20 },
-            // 窄缝通道（需要压扁）
             { x: 480, y: 280, w: 120, h: 10, isBarrier: true },
-            // 最终平台（终点）
             { x: 650, y: 180, w: 130, h: 20 },
-            // 左侧上升路线
             { x: 50, y: 300, w: 80, h: 20 },
             { x: 150, y: 230, w: 80, h: 20 },
-            // 中间平台
             { x: 280, y: 180, w: 100, h: 20 },
         ];
         
-        // 终点旗子
         const goal = { x: 700, y: 130, w: 30, h: 50 };
         
-        // 颜色
         const COLORS = {
             bg: '#1a1a2e',
             platform: '#4a4a6a',
@@ -98,12 +89,13 @@
             goal: '#ffd700'
         };
         
-        // ===== 跳跃缓冲 =====
-        function tryJump() {
-            // 合并状态或分离状态的下半身都能跳
+        // ===== 跳跃 =====
+        function tryJump(isBigJump) {
             if (lower.onGround || coyoteTimer > 0) {
-                lower.vy = -JUMP_POWER;
+                const power = isBigJump ? JUMP_POWER_BIG : JUMP_POWER_SMALL;
+                lower.vy = -power;
                 lower.onGround = false;
+                lower.isJumping = true;
                 coyoteTimer = 0;
                 jumpBufferTimer = 0;
                 return true;
@@ -117,32 +109,28 @@
             lower.onGround = false;
             
             for (const p of platforms) {
-                // 只检测从上方落下时的碰撞
                 if (lower.vy >= 0) {
                     const prevBottom = lower.y - lower.vy;
                     const currBottom = lower.y;
                     
-                    // 身体左侧在平台范围内
                     if (lower.x > p.x && lower.x < p.x + p.w) {
-                        // 上一帧在平台上方的角色，这一帧穿过平台
                         if (prevBottom <= p.y && currBottom >= p.y) {
                             lower.y = p.y;
                             lower.vy = 0;
                             lower.onGround = true;
+                            lower.isJumping = false;
                             break;
                         }
                     }
                 }
             }
             
-            // 土狼时间：刚离开平台时
             if (wasOnGround && !lower.onGround && lower.vy >= 0) {
                 coyoteTimer = COYOTE_TIME;
             }
         }
         
         function checkGoal() {
-            // 到达终点检测
             if (lower.x > goal.x && lower.x < goal.x + goal.w &&
                 lower.y > goal.y && lower.y < goal.y + goal.h) {
                 gameWon = true;
@@ -166,16 +154,15 @@
             if (e.code === 'KeyD') keys.d = true;
             if (e.code === 'KeyS') { keys.s = true; isCrouching = true; }
             if (e.code === 'KeyR' && gameWon) { resetGame(); }
+            
+            // 空格 = 跳跃
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (!keys.space) {
                     keys.space = true;
-                    holdFrames = 0;
-                    isCharging = true;
-                    wasSeparating = false;
-                    jumpBufferTimer = JUMP_BUFFER; // 跳跃缓冲
+                    jumpBufferTimer = JUMP_BUFFER;
                     
-                    // 分离状态检查融合
+                    // 分离状态：检查融合
                     if (isSeparated) {
                         const dx = lower.x - upper.x;
                         const dy = lower.y - upper.y;
@@ -184,9 +171,22 @@
                             upper.launched = false;
                             upper.x = lower.x;
                             upper.y = lower.y - 50;
-                            isCharging = false;
+                        } else if (lower.onGround || coyoteTimer > 0) {
+                            // 远离时也能跳
+                            tryJump(false);
                         }
                     }
+                }
+            }
+            
+            // W = 分离
+            if (e.code === 'KeyW') {
+                e.preventDefault();
+                if (!keys.w && !isSeparated) {
+                    keys.w = true;
+                    isChargingW = true;
+                    holdFramesW = 0;
+                    wasSeparating = false;
                 }
             }
         });
@@ -195,9 +195,24 @@
             if (e.code === 'KeyA') keys.a = false;
             if (e.code === 'KeyD') keys.d = false;
             if (e.code === 'KeyS') { keys.s = false; isCrouching = false; }
+            
+            // 空格松开 = 决定大小跳
             if (e.code === 'Space') {
                 if (keys.space) {
-                    // 长按后松开 = 发射上半身
+                    if (!isSeparated) {
+                        // 如果在地面上且没有在跳跃，尝试小跳
+                        if (lower.onGround || coyoteTimer > 0) {
+                            tryJump(false);
+                        }
+                    }
+                    keys.space = false;
+                    jumpBufferTimer = 0;
+                }
+            }
+            
+            // W松开 = 发射
+            if (e.code === 'KeyW') {
+                if (keys.w) {
                     if (wasSeparating && isSeparated) {
                         const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
                         const power = Math.min(chargePower, MAX_POWER);
@@ -205,18 +220,10 @@
                         upper.vy = Math.sin(angle) * power;
                         upper.launched = true;
                     }
-                    // 短按 = 尝试跳跃（带缓冲）
-                    else if (holdFrames < HOLD_THRESHOLD) {
-                        if (!tryJump()) {
-                            // 跳不了就缓冲
-                            jumpBufferTimer = JUMP_BUFFER;
-                        }
-                    }
-                    
-                    keys.space = false;
-                    isCharging = false;
+                    keys.w = false;
+                    isChargingW = false;
                     chargePower = 0;
-                    holdFrames = 0;
+                    holdFramesW = 0;
                     wasSeparating = false;
                 }
             }
@@ -250,22 +257,21 @@
             if (keys.a) lower.x -= MOVE_SPEED;
             if (keys.d) lower.x += MOVE_SPEED;
             
-            // 跳跃缓冲递减
-            if (jumpBufferTimer > 0) {
+            // 跳跃缓冲
+            if (jumpBufferTimer > 0 && !lower.isJumping) {
                 jumpBufferTimer--;
-                if (tryJump()) {
-                    // 跳跃成功
+                if (lower.onGround || coyoteTimer > 0) {
+                    tryJump(false);
                 }
             }
             
-            // 土狼时间递减
+            // 土狼时间
             if (coyoteTimer > 0) coyoteTimer--;
             
             // 重力
             lower.vy += GRAVITY;
             lower.y += lower.vy;
             
-            // 碰撞检测
             checkPlatformCollision();
             
             // 头的位置
@@ -274,18 +280,18 @@
                 upper.y = isCrouching ? lower.y - 25 : lower.y - 50;
             }
             
-            // 蓄力检测
-            if (keys.space && isCharging && !isSeparated) {
-                holdFrames++;
+            // W蓄力检测（分离）
+            if (keys.w && isChargingW && !isSeparated) {
+                holdFramesW++;
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
-                if (holdFrames >= HOLD_THRESHOLD) {
+                if (holdFramesW >= HOLD_FOR_BIG_JUMP) {
                     isSeparated = true;
                     upper.launched = false;
                     upper.x = lower.x;
                     upper.y = lower.y - 50;
                     wasSeparating = true;
-                    isCharging = false;
+                    isChargingW = false;
                 }
             }
             
@@ -295,7 +301,6 @@
                 upper.x += upper.vx;
                 upper.y += upper.vy;
                 
-                // 和地面碰撞
                 for (const p of platforms) {
                     if (upper.y + 15 > p.y && upper.y < p.y + p.h &&
                         upper.x > p.x && upper.x < p.x + p.w) {
@@ -306,7 +311,6 @@
                     }
                 }
                 
-                // 边界
                 if (upper.x < 15) { upper.x = 15; upper.vx *= -0.5; }
                 if (upper.x > 785) { upper.x = 785; upper.vx *= -0.5; }
             } else if (isSeparated) {
@@ -326,16 +330,12 @@
                 }
             }
             
-            // 边界
             lower.x = Math.max(15, Math.min(785, lower.x));
-            
-            // 终点检测
             checkGoal();
         }
         
         // ===== 绘制 =====
         function draw() {
-            // 背景
             ctx.fillStyle = COLORS.bg;
             ctx.fillRect(0, 0, 800, 500);
             
@@ -349,14 +349,13 @@
             for (const p of platforms) {
                 ctx.fillStyle = p.isBarrier ? COLORS.barrier : COLORS.platform;
                 ctx.fillRect(p.x, p.y, p.w, p.h);
-                // 平台高光
                 ctx.fillStyle = 'rgba(255,255,255,0.1)';
                 ctx.fillRect(p.x, p.y, p.w, 3);
             }
             
-            // 终点旗子
+            // 终点
             ctx.fillStyle = COLORS.goal;
-            ctx.fillRect(goal.x, goal.y, 4, goal.h); // 旗杆
+            ctx.fillRect(goal.x, goal.y, 4, goal.h);
             ctx.beginPath();
             ctx.moveTo(goal.x + 4, goal.y);
             ctx.lineTo(goal.x + 30, goal.y + 15);
@@ -364,12 +363,11 @@
             ctx.fillStyle = '#ff6b6b';
             ctx.fill();
             
-            // 玩家 - 下半身
+            // 下半身
             const bodyH = isCrouching ? lower.crouchHeight : 40;
             ctx.fillStyle = COLORS.player;
             ctx.fillRect(lower.x - 15, lower.y - bodyH, 30, bodyH);
             
-            // 腿
             ctx.fillStyle = '#c0392b';
             if (!isCrouching) {
                 ctx.fillRect(lower.x - 12, lower.y - 5, 6, 10);
@@ -379,13 +377,12 @@
                 ctx.fillRect(lower.x + 7, lower.y - 5, 8, 5);
             }
             
-            // 玩家 - 上半身
+            // 上半身
             ctx.fillStyle = COLORS.head;
             ctx.beginPath();
             ctx.arc(upper.x, upper.y, 15, 0, Math.PI * 2);
             ctx.fill();
             
-            // 眼睛
             ctx.fillStyle = '#fff';
             ctx.beginPath();
             ctx.arc(upper.x - 5, upper.y - 3, 4, 0, Math.PI * 2);
@@ -397,10 +394,10 @@
             ctx.arc(upper.x + 6, upper.y - 2, 2, 0, Math.PI * 2);
             ctx.fill();
             
-            // 蓄力圈
-            if (isCharging && holdFrames > 0) {
-                const progress = Math.min(holdFrames / HOLD_THRESHOLD, 1);
-                ctx.strokeStyle = `rgba(255, 255, 0, ${progress})`;
+            // W蓄力圈
+            if (isChargingW && holdFramesW > 0) {
+                const progress = Math.min(holdFramesW / HOLD_FOR_BIG_JUMP, 1);
+                ctx.strokeStyle = `rgba(0, 255, 255, ${progress})`;
                 ctx.lineWidth = 3;
                 ctx.beginPath();
                 ctx.arc(upper.x, upper.y, 20 + progress * 10, 0, Math.PI * 2 * progress);
@@ -441,19 +438,19 @@
             } else {
                 ctx.fillText('小小跳跃', 10, 20);
                 if (isSeparated) {
-                    ctx.fillText('分离模式 | 空格=下身跳跃/发射 | 靠近后空格融合', 10, 480);
+                    ctx.fillText('分离模式 | 空格=下身跳跃 | W=发射 | 靠近后空格融合', 10, 480);
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
-                } else if (isCharging) {
-                    ctx.fillText(`蓄力: ${Math.round(holdFrames / HOLD_THRESHOLD * 100)}%`, 10, 480);
+                } else if (isChargingW) {
+                    const p = Math.round(Math.min(holdFramesW / HOLD_FOR_BIG_JUMP * 100, 100));
+                    ctx.fillText(`W蓄力: ${p}%`, 10, 480);
                 } else {
-                    ctx.fillText('短按空格=跳跃 | 长按空格=分离', 10, 480);
+                    ctx.fillText('空格=跳跃 | W长按=分离', 10, 480);
                 }
                 
-                // 土狼时间指示（调试用）
                 if (coyoteTimer > 0) {
                     ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
-                    ctx.fillText('土狼时间!', lower.x - 20, lower.y - 60);
+                    ctx.fillText('土狼!', lower.x - 15, lower.y - 60);
                 }
             }
         }
