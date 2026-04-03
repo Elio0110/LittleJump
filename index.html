@@ -250,6 +250,11 @@
                     if (wasSeparating && isSeparated) {
                         launchUpperBody();
                     } else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lowerBody.onGround) {
+                        // 合并状态短按 = 跳跃
+                        lowerBody.vy = -JUMP_POWER;
+                        lowerBody.onGround = false;
+                    } else if (isSeparated && !upperBody.launched && holdFrames < HOLD_THRESHOLD && lowerBody.onGround) {
+                        // 分离状态短按 = 下身跳跃
                         lowerBody.vy = -JUMP_POWER;
                         lowerBody.onGround = false;
                     }
