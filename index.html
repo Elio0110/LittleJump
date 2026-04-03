@@ -14,8 +14,8 @@
 </head>
 <body>
     <canvas id="game" width="800" height="500"></canvas>
-    <div id="info">空格跳跃（长短按控制高度）| W长按分离+发射 | 到达终点 ⭐ 获胜！</div>
-    <div id="controls">A/D移动 | S压扁 | 空格跳跃 | W分离 | 左键发射</div>
+    <div id="info">空格=跳跃 | W=分离/融合/发射 | 到达终点 ⭐ 获胜！</div>
+    <div id="controls">A/D移动 | S压扁 | 空格跳跃 | W长按分离，靠近W融合，松开W发射</div>
     
     <script>
         const canvas = document.getElementById('game');
@@ -155,38 +155,50 @@
             if (e.code === 'KeyS') { keys.s = true; isCrouching = true; }
             if (e.code === 'KeyR' && gameWon) { resetGame(); }
             
-            // 空格 = 跳跃
+            // 空格 = 跳跃（只管跳跃）
             if (e.code === 'Space') {
                 e.preventDefault();
                 if (!keys.space) {
                     keys.space = true;
                     jumpBufferTimer = JUMP_BUFFER;
                     
-                    // 分离状态：检查融合
-                    if (isSeparated) {
-                        const dx = lower.x - upper.x;
-                        const dy = lower.y - upper.y;
-                        if (Math.sqrt(dx*dx + dy*dy) < 50) {
-                            isSeparated = false;
-                            upper.launched = false;
-                            upper.x = lower.x;
-                            upper.y = lower.y - 50;
-                        } else if (lower.onGround || coyoteTimer > 0) {
-                            // 远离时也能跳
-                            tryJump(false);
-                        }
+                    // 分离状态下也能跳
+                    if (isSeparated && (lower.onGround || coyoteTimer > 0)) {
+                        tryJump(false);
                     }
                 }
             }
             
-            // W = 分离
+            // W = 分离/融合
             if (e.code === 'KeyW') {
                 e.preventDefault();
-                if (!keys.w && !isSeparated) {
+                if (!keys.w) {
                     keys.w = true;
-                    isChargingW = true;
-                    holdFramesW = 0;
-                    wasSeparating = false;
+                    
+                    // 分离状态下检查融合
+                    if (isSeparated) {
+                        const dx = lower.x - upper.x;
+                        const dy = lower.y - upper.y;
+                        if (Math.sqrt(dx*dx + dy*dy) < 50) {
+                            // 靠近就融合
+                            isSeparated = false;
+                            upper.launched = false;
+                            upper.x = lower.x;
+                            upper.y = lower.y - 50;
+                            isChargingW = false;
+                        } else {
+                            // 远离就准备发射（如果还没发射）
+                            if (!upper.launched) {
+                                isChargingW = true;
+                                holdFramesW = 0;
+                            }
+                        }
+                    } else {
+                        // 合并状态开始蓄力分离
+                        isChargingW = true;
+                        holdFramesW = 0;
+                        wasSeparating = false;
+                    }
                 }
             }
         });
@@ -210,10 +222,10 @@
                 }
             }
             
-            // W松开 = 发射
+            // W松开 = 发射（如果处于分离且蓄力状态）
             if (e.code === 'KeyW') {
                 if (keys.w) {
-                    if (wasSeparating && isSeparated) {
+                    if (wasSeparating && isSeparated && !upper.launched) {
                         const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
                         const power = Math.min(chargePower, MAX_POWER);
                         upper.vx = Math.cos(angle) * power;
@@ -438,14 +450,14 @@
             } else {
                 ctx.fillText('小小跳跃', 10, 20);
                 if (isSeparated) {
-                    ctx.fillText('分离模式 | 空格=下身跳跃 | W=发射 | 靠近后空格融合', 10, 480);
+                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近W融合 | 长按W蓄力，松开发射', 10, 480);
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
                 } else if (isChargingW) {
                     const p = Math.round(Math.min(holdFramesW / HOLD_FOR_BIG_JUMP * 100, 100));
-                    ctx.fillText(`W蓄力: ${p}%`, 10, 480);
+                    ctx.fillText(`W蓄力分离: ${p}%`, 10, 480);
                 } else {
-                    ctx.fillText('空格=跳跃 | W长按=分离', 10, 480);
+                    ctx.fillText('空格=跳跃 | W长按=分离 | 靠近W融合', 10, 480);
                 }
                 
                 if (coyoteTimer > 0) {
