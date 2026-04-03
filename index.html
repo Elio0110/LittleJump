@@ -225,9 +225,11 @@
         });
         
         // 右键 = 分离/融合/蓄力
+        let isRightMouseDown = false;
         canvas.addEventListener('mousedown', (e) => {
             if (e.button === 2) {
                 e.preventDefault();
+                isRightMouseDown = true;
                 
                 // 分离状态下检查融合
                 if (isSeparated) {
@@ -240,6 +242,7 @@
                         upper.x = lower.x;
                         upper.y = lower.y - 50;
                         isChargingW = false;
+                        isRightMouseDown = false;
                     } else if (!upper.launched) {
                         // 远离就准备发射
                         isChargingW = true;
@@ -257,6 +260,7 @@
         // 右键松开 = 发射
         canvas.addEventListener('mouseup', (e) => {
             if (e.button === 2) {
+                isRightMouseDown = false;
                 if (wasSeparating && isSeparated && !upper.launched) {
                     const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
                     const power = Math.min(chargePower, MAX_POWER);
@@ -310,19 +314,23 @@
             
             checkPlatformCollision();
             
-            // 头的位置（蓄力时可调整）
+            // 头的位置（蓄力时可调整，压扁时跟随）
             if (!isSeparated) {
                 upper.x = lower.x;
                 if (isChargingW) {
                     // 蓄力时使用可调整的位置
                     upper.y = lower.y + chargeUpperOffset;
+                } else if (isCrouching) {
+                    // 压扁时头降低
+                    upper.y = lower.y - 25;
                 } else {
-                    upper.y = isCrouching ? lower.y - 25 : lower.y - 50;
+                    // 正常站立
+                    upper.y = lower.y - 50;
                 }
             }
             
-            // W蓄力检测（分离）
-            if (keys.w && isChargingW && !isSeparated) {
+            // 右键蓄力检测（分离）
+            if (isRightMouseDown && isChargingW && !isSeparated) {
                 holdFramesW++;
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
                 
