@@ -72,10 +72,19 @@
                     isCharging = true;
                     wasSeparating = false;
                     
-                    // 分离状态短按空格 = 下半身跳跃
-                    if (isSeparated && lower.onGround) {
-                        lower.vy = -JUMP_POWER;
-                        lower.onGround = false;
+                    // 分离状态下先检查是否能融合
+                    if (isSeparated) {
+                        const dx = lower.x - upper.x;
+                        const dy = lower.y - upper.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist < 50) {
+                            // 靠近就融合
+                            isSeparated = false;
+                            upper.launched = false;
+                            upper.x = lower.x;
+                            upper.y = lower.y - 50;
+                            isCharging = false;
+                        }
                     }
                 }
             }
@@ -97,6 +106,11 @@
                     }
                     // 合并状态短按 = 跳跃
                     else if (!isSeparated && holdFrames < HOLD_THRESHOLD && lower.onGround) {
+                        lower.vy = -JUMP_POWER;
+                        lower.onGround = false;
+                    }
+                    // 分离状态短按 = 下身跳跃（没融合的情况）
+                    else if (isSeparated && holdFrames < HOLD_THRESHOLD && lower.onGround) {
                         lower.vy = -JUMP_POWER;
                         lower.onGround = false;
                     }
