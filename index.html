@@ -458,10 +458,6 @@
                 ctx.arc(upper.x, upper.y, 38, 0, Math.PI * 2);
                 ctx.stroke();
                 
-                // 蓄力进度（用填充扇形而不是弧线）
-                const startAngle = -Math.PI / 2;
-                const endAngle = startAngle + Math.PI * 2 * progress;
-                
                 // 设置颜色
                 if (progress < sepRatio) {
                     const alpha = 0.6 + (progress / sepRatio) * 0.4;
@@ -474,10 +470,17 @@
                     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
                 }
                 
-                // 画扇形填充
+                // 画扇形填充（处理满圈情况）
                 ctx.beginPath();
                 ctx.moveTo(upper.x, upper.y);
-                ctx.arc(upper.x, upper.y, 38, startAngle, endAngle, false);
+                if (progress >= 0.99) {
+                    // 满圈时画完整圆
+                    ctx.arc(upper.x, upper.y, 38, 0, Math.PI * 2, false);
+                } else {
+                    const startAngle = -Math.PI / 2;
+                    const endAngle = startAngle + Math.PI * 2 * progress;
+                    ctx.arc(upper.x, upper.y, 38, startAngle, endAngle, false);
+                }
                 ctx.closePath();
                 ctx.fill();
                 
@@ -490,7 +493,7 @@
                 
                 // 分离点标记
                 if (!isSeparated) {
-                    const sepAngle = startAngle + Math.PI * 2 * sepRatio;
+                    const sepAngle = -Math.PI / 2 + Math.PI * 2 * sepRatio;
                     ctx.fillStyle = '#fff';
                     ctx.beginPath();
                     ctx.arc(
