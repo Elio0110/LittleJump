@@ -224,7 +224,7 @@
             if (e.button === 0) shootFireball();
         });
         
-        // 右键 = 分离/融合/蓄力
+        // 右键 = 融合/蓄力发射
         let isRightMouseDown = false;
         canvas.addEventListener('mousedown', (e) => {
             if (e.button === 2) {
@@ -243,31 +243,35 @@
                         upper.y = lower.y - 50;
                         isChargingW = false;
                         isRightMouseDown = false;
-                    } else if (!upper.launched) {
-                        // 远离就准备发射
-                        isChargingW = true;
-                        holdFramesW = 0;
                     }
                 } else {
-                    // 合并状态开始蓄力分离
+                    // 合并状态开始蓄力
                     isChargingW = true;
                     holdFramesW = 0;
-                    wasSeparating = false;
+                    chargePower = 0;
                 }
             }
         });
         
-        // 右键松开 = 发射
+        // 右键松开 = 发射上半身
         canvas.addEventListener('mouseup', (e) => {
             if (e.button === 2) {
+                e.preventDefault();
                 isRightMouseDown = false;
-                if (wasSeparating && isSeparated && !upper.launched) {
+                
+                if (isChargingW && !isSeparated && holdFramesW > 0) {
+                    // 蓄力状态松开：发射上半身
+                    isSeparated = true;
+                    upper.launched = true;
+                    upper.x = lower.x;
+                    upper.y = lower.y - 50;
+                    
                     const angle = Math.atan2(mouseY - upper.y, mouseX - upper.x);
                     const power = Math.min(chargePower, MAX_POWER);
                     upper.vx = Math.cos(angle) * power;
                     upper.vy = Math.sin(angle) * power;
-                    upper.launched = true;
                 }
+                
                 isChargingW = false;
                 chargePower = 0;
                 holdFramesW = 0;
@@ -327,19 +331,10 @@
                 }
             }
             
-            // 右键蓄力检测（分离）
+            // 右键蓄力检测（只蓄力，不分离）
             if (isRightMouseDown && isChargingW && !isSeparated) {
                 holdFramesW++;
                 chargePower = Math.min(chargePower + POWER_RATE, MAX_POWER);
-                
-                // 达到分离阈值
-                if (holdFramesW >= HOLD_FOR_SEPARATION && !isSeparated) {
-                    isSeparated = true;
-                    upper.launched = false;
-                    upper.x = lower.x;
-                    upper.y = lower.y + chargeUpperOffset; // 使用调整后的位置
-                    wasSeparating = true;
-                }
                 
                 // 限制最大蓄力
                 if (holdFramesW > MAX_CHARGE_FRAMES) {
@@ -546,21 +541,16 @@
             } else {
                 ctx.fillText('小小跳跃', 10, 20);
                 if (isSeparated) {
-                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近右键融合 | 长按右键蓄力，松开发射', 10, 480);
+                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近+右键=融合', 10, 480);
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
                 } else if (isChargingW) {
                     const progress = Math.min(holdFramesW / MAX_CHARGE_FRAMES, 1);
                     const seconds = (holdFramesW / 60).toFixed(1);
                     const percent = Math.round(progress * 100);
-                    const heightPercent = Math.round((chargeUpperOffset + 80) / 60 * 100);
-                    if (!isSeparated) {
-                        ctx.fillText(`右键蓄力: ${seconds}s / 3.0s (${percent}%) | S调整高度(${heightPercent}%)`, 10, 480);
-                    } else {
-                        ctx.fillText(`已分离！右键蓄力: ${seconds}s / 3.0s (${percent}%) 松开发射`, 10, 480);
-                    }
+                    ctx.fillText(`蓄力中: ${seconds}s / 3.0s (${percent}%) | 松开发射`, 10, 480);
                 } else {
-                    ctx.fillText('空格=跳跃 | 右键长按=分离 | 靠近右键融合', 10, 480);
+                    ctx.fillText('空格=跳跃 | 长按右键=蓄力发射 | 靠近+右键=融合', 10, 480);
                 }
                 
                 if (coyoteTimer > 0) {
