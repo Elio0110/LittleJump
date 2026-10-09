@@ -35,3 +35,11 @@
 ---
 
 *Made with ❤️ by 小小杯月*
+
+## 猫猫 · 头号冒险 Demo
+
+新增独立试玩版：自由角度瞄准、长按空格蓄力发射头部、Tab 切换控制，头部和身体碰到自动合体。包括星星收集、桥梁开关和检查点。
+
+- 在线试玩：[猫猫 · 头号冒险](https://elio0110.github.io/LittleJump/cat-launch/)
+- 本地运行：用浏览器打开 `cat-launch/index.html`。
+- 完整操作说明：[cat-launch/README.md](cat-launch/README.md)。
