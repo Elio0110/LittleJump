@@ -14,8 +14,9 @@
 </head>
 <body>
     <canvas id="game" width="800" height="500"></canvas>
-    <div id="info">空格=跳跃 | 右键=分离/融合/发射 | 蓄力时S调整发射高度 | 到达终点 ⭐ 获胜！</div>
-    <div id="controls">A/D移动 | S压扁/调整高度 | 空格跳跃 | 右键长按蓄力，靠近右键融合，松开发射</div>
+    <div id="info">根目录原型：空格=下半身跳跃 | 左键=头部发射火球 | 到达终点 ⭐ 获胜后按 R 重开</div>
+    <div id="controls">A/D移动下半身 | S按住压扁 | 鼠标瞄准 | 合体时按住右键蓄力，松开抛头；分离后靠近头部按右键融合</div>
+    <div id="controls-note" style="color:#888;font-size:12px;margin-top:5px;">空格不蓄力、不融合；S不调整抛头起点。<a href="cat-launch/" style="color:#aaa;">猫猫独立 Demo</a> 使用左键蓄力抛头、相碰自动合体。</div>
     
     <script>
         const canvas = document.getElementById('game');
@@ -27,8 +28,7 @@
         const POWER_RATE = 0.3;      // 蓄力速度
         const JUMP_POWER_SMALL = 9;
         const JUMP_POWER_BIG = 14;
-        const HOLD_FOR_SEPARATION = 60; // 1秒后分离
-        const MAX_CHARGE_FRAMES = 180;  // 3秒最大蓄力
+        const MAX_CHARGE_FRAMES = 180;  // 蓄力计时上限；实际力度由 MAX_POWER / POWER_RATE 决定
         const MOVE_SPEED = 5;
         
         // 土狼时间 & 跳跃缓冲
@@ -46,7 +46,7 @@
         let jumpBufferTimer = 0;
         let gameWon = false;
         
-        // 蓄力时可调整上半身位置
+        // 旧版蓄力高度状态：当前绘制及发射起点未使用该偏移
         let chargeUpperOffset = -50; // 默认在头上50像素
         const MIN_UPPER_OFFSET = -80; // 最高
         const MAX_UPPER_OFFSET = -20; // 最低
@@ -161,7 +161,7 @@
             if (e.code === 'KeyS') { 
                 keys.s = true; 
                 isCrouching = true;
-                // 蓄力时按S降低上半身位置
+                // 保留旧版偏移更新；当前仅压扁姿势生效，不改变抛头起点
                 if (isChargingW && !isSeparated) {
                     chargeUpperOffset = Math.min(chargeUpperOffset + 2, MAX_UPPER_OFFSET);
                 }
@@ -182,7 +182,7 @@
                 }
             }
             
-            // W键（备用）
+            // W仅记录状态，当前未绑定动作
             if (e.code === 'KeyW') {
                 keys.w = true;
             }
@@ -193,7 +193,7 @@
             if (e.code === 'KeyD') keys.d = false;
             if (e.code === 'KeyS') { keys.s = false; isCrouching = false; }
             
-            // 空格松开 = 决定大小跳
+            // 空格松开：仍可在落地或土狼时间内尝试小跳，不负责蓄力或融合
             if (e.code === 'Space') {
                 if (keys.space) {
                     if (!isSeparated) {
@@ -318,7 +318,7 @@
             
             checkPlatformCollision();
             
-            // 头的位置（蓄力时可调整，压扁时跟随）
+            // 头的位置随压扁姿势变化；不使用旧版蓄力偏移
             if (!isSeparated) {
                 upper.x = lower.x;
                 
@@ -443,8 +443,8 @@
             
             // 右键蓄力圈（完整360°）
             if (isChargingW && holdFramesW > 0) {
-                const progress = Math.min(holdFramesW / MAX_CHARGE_FRAMES, 1);
-                const sepRatio = HOLD_FOR_SEPARATION / MAX_CHARGE_FRAMES;
+                const progress = Math.min(chargePower / MAX_POWER, 1);
+                const colorTransition = 1 / 3;
                 
                 // 背景圈（完整灰色）
                 ctx.strokeStyle = 'rgba(80, 80, 80, 0.5)';
@@ -454,11 +454,11 @@
                 ctx.stroke();
                 
                 // 设置颜色
-                if (progress < sepRatio) {
-                    const alpha = 0.6 + (progress / sepRatio) * 0.4;
+                if (progress < colorTransition) {
+                    const alpha = 0.6 + (progress / colorTransition) * 0.4;
                     ctx.fillStyle = `rgba(255, 220, 0, ${alpha})`; // 黄色
                 } else {
-                    const powerProgress = (progress - sepRatio) / (1 - sepRatio);
+                    const powerProgress = (progress - colorTransition) / (1 - colorTransition);
                     const r = Math.floor(50 + powerProgress * 205);
                     const g = Math.floor(255 - powerProgress * 150);
                     const b = 50;
@@ -485,19 +485,6 @@
                 ctx.beginPath();
                 ctx.arc(upper.x, upper.y, 38, 0, Math.PI * 2);
                 ctx.stroke();
-                
-                // 分离点标记
-                if (!isSeparated) {
-                    const sepAngle = -Math.PI / 2 + Math.PI * 2 * sepRatio;
-                    ctx.fillStyle = '#fff';
-                    ctx.beginPath();
-                    ctx.arc(
-                        upper.x + Math.cos(sepAngle) * 38,
-                        upper.y + Math.sin(sepAngle) * 38,
-                        5, 0, Math.PI * 2
-                    );
-                    ctx.fill();
-                }
                 
                 // 中心显示力度百分比
                 ctx.fillStyle = '#fff';
@@ -541,16 +528,15 @@
             } else {
                 ctx.fillText('小小跳跃', 10, 20);
                 if (isSeparated) {
-                    ctx.fillText('分离模式 | 空格=下身跳跃 | 靠近+右键=融合', 10, 480);
+                    ctx.fillText('分离模式 | 空格=下身跳跃 | 左键=火球 | 靠近+右键=融合', 10, 480);
                 } else if (isCrouching) {
                     ctx.fillText('压扁中...', 10, 480);
                 } else if (isChargingW) {
-                    const progress = Math.min(holdFramesW / MAX_CHARGE_FRAMES, 1);
-                    const seconds = (holdFramesW / 60).toFixed(1);
+                    const progress = Math.min(chargePower / MAX_POWER, 1);
                     const percent = Math.round(progress * 100);
-                    ctx.fillText(`蓄力中: ${seconds}s / 3.0s (${percent}%) | 松开发射`, 10, 480);
+                    ctx.fillText(`右键蓄力中：力度 ${percent}% | 松开右键分离并发射头部`, 10, 480);
                 } else {
-                    ctx.fillText('空格=跳跃 | 长按右键=蓄力发射 | 靠近+右键=融合', 10, 480);
+                    ctx.fillText('空格=下身跳跃 | 左键=火球 | 合体时按住右键蓄力，松开抛头', 10, 480);
                 }
                 
                 if (coyoteTimer > 0) {
@@ -570,3 +556,4 @@
     </script>
 </body>
 </html>
+
